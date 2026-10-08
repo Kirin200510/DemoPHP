@@ -1,0 +1,14 @@
+# Python virtual environment and bytecode
+venv/
+__pycache__/
+*.py[cod]
+
+# Runtime uploads and generated processing artifacts
+input/
+output/
+result/
+tmp/
+ai_result.jpg
+
+# Local editor/session files
+*.ses
