@@ -20,6 +20,19 @@ class ImageDocument extends Model
     protected $fillable = [
         'original_path',
         'processed_path',
+        'ocr_raw_data',
+        'ocr_structured_data',
         'status',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'ocr_raw_data' => 'array',
+            'ocr_structured_data' => 'array',
+        ];
+    }
 }

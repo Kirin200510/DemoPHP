@@ -12,6 +12,10 @@ if (uploadInput && uploadForm) {
     const processSpinner = document.querySelector('#process-spinner');
     let previewUrl;
 
+    const updateProcessButton = () => {
+        processButton.disabled = uploadInput.files.length === 0;
+    };
+
     const updatePreview = () => {
         const [file] = uploadInput.files;
 
@@ -26,6 +30,7 @@ if (uploadInput && uploadForm) {
             placeholder.classList.remove('hidden');
             selectedFile.classList.add('hidden');
             selectedFile.classList.remove('flex');
+            updateProcessButton();
             return;
         }
 
@@ -36,6 +41,7 @@ if (uploadInput && uploadForm) {
         selectedFileName.textContent = file.name;
         selectedFile.classList.remove('hidden');
         selectedFile.classList.add('flex');
+        updateProcessButton();
     };
 
     uploadInput.addEventListener('change', updatePreview);
@@ -46,9 +52,18 @@ if (uploadInput && uploadForm) {
         uploadInput.click();
     });
 
-    uploadForm.addEventListener('submit', () => {
+    uploadForm.addEventListener('submit', (event) => {
+        if (uploadInput.files.length === 0) {
+            event.preventDefault();
+            updateProcessButton();
+            return;
+        }
+
         processButton.disabled = true;
+        processButton.classList.add('cursor-wait');
         processButtonLabel.textContent = 'AI đang xử lý...';
         processSpinner.classList.remove('hidden');
     });
+
+    updateProcessButton();
 }

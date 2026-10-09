@@ -56,6 +56,219 @@
         @endif
     </section>
 
+    @php
+        $faceCropData = data_get($document->ocr_structured_data, 'face_crop', []);
+        $hasStoredFaceCrop = data_get($faceCropData, 'status') === 'detected'
+            && is_string(data_get($faceCropData, 'stored_path'));
+    @endphp
+
+    @if ($hasStoredFaceCrop)
+        <section class="mt-7 overflow-hidden rounded-2xl border border-violet-400/25 bg-violet-400/[0.04]">
+            <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                <div>
+                    <h2 class="font-semibold text-white">Khuôn mặt được trích xuất</h2>
+                    <p class="mt-1 text-xs text-slate-400">YuNet phát hiện khuôn mặt trên ảnh giấy tờ sau xử lý.</p>
+                </div>
+                <span class="rounded-full bg-violet-400/10 px-2.5 py-1 text-xs text-violet-200">Face crop</span>
+            </div>
+            <div class="grid place-items-center bg-slate-900/60 p-5">
+                <img src="{{ route('documents.face-crop', $document) }}" alt="Khuôn mặt được trích xuất từ giấy tờ" class="max-h-80 max-w-full rounded-xl object-contain">
+            </div>
+        </section>
+    @endif
+
+    @if ($document->ocr_structured_data)
+        @php
+            $structuredData = $document->ocr_structured_data;
+            $structuredFields = data_get($structuredData, 'fields', []);
+            $documentType = data_get($structuredData, 'document');
+            $verificationData = data_get($structuredData, 'verification', []);
+            $unmappedRawLines = data_get($structuredData, 'unmapped_raw_lines', []);
+            $allOcrLines = data_get($document->ocr_raw_data, 'lines', []);
+            $documentTypeKey = data_get($documentType, 'document_type');
+            $displayProfiles = [
+                'citizen_identity_card' => [
+                    'document_label' => 'CCCD',
+                    'fields' => [
+                        'cccd_number' => 'Số/No',
+                        'full_name' => 'Họ và tên',
+                        'sex' => 'Giới tính',
+                        'date_of_birth' => 'Ngày sinh',
+                        'nationality' => 'Quốc tịch',
+                        'place_of_origin' => 'Quê quán',
+                        'residence' => 'Nơi thường trú',
+                        'expiry_date' => 'Có giá trị đến',
+                    ],
+                ],
+                'driver_license' => [
+                    'document_label' => 'Giấy phép lái xe',
+                    'fields' => [
+                        'document_number' => 'Số/No',
+                        'full_name' => 'Họ và tên',
+                        'date_of_birth' => 'Ngày sinh',
+                        'nationality' => 'Quốc tịch',
+                        'residence' => 'Nơi cư trú',
+                        'license_class' => 'Hạng/Class',
+                        'expiry_date' => 'Có giá trị đến',
+                    ],
+                ],
+                'vehicle_registration' => [
+                    'document_label' => 'Giấy chứng nhận đăng ký xe',
+                    'fields' => [
+                        'owner_name' => 'Tên chủ xe',
+                        'vehicle_address' => 'Địa chỉ',
+                        'brand' => 'Nhãn hiệu',
+                        'model_code' => 'Số loại',
+                        'engine_number' => 'Số máy',
+                        'chassis_number' => 'Số khung',
+                        'paint_color' => 'Màu sơn',
+                        'operating_scope' => 'Hoạt động trong phạm vi (ô tô)',
+                        'registration_plate' => 'Biển số xe đăng ký',
+                        'seating_capacity' => 'Số chỗ ngồi (ô tô)',
+                        'expiry_date' => 'Giá trị đến ngày',
+                        'engine_power' => 'Công suất (xe máy)',
+                        'vehicle_type' => 'Loại xe (xe máy)',
+                        'engine_displacement' => 'Dung tích (xe máy)',
+                    ],
+                ],
+            ];
+            $displayProfile = $displayProfiles[$documentTypeKey] ?? null;
+            $displayFields = data_get($displayProfile, 'fields', []);
+
+            if (
+                $documentTypeKey === 'citizen_identity_card'
+                && ! array_key_exists('cccd_number', $structuredFields)
+                && array_key_exists('document_number', $structuredFields)
+            ) {
+                $structuredFields['cccd_number'] = $structuredFields['document_number'];
+                unset($structuredFields['document_number']);
+            }
+
+            $additionalStructuredFields = array_diff_key($structuredFields, $displayFields);
+            $verificationLines = data_get($verificationData, 'matched_lines', []);
+        @endphp
+
+        <section class="mt-7 overflow-hidden rounded-2xl border border-emerald-400/25 bg-emerald-400/[0.04]">
+            <div class="flex flex-col gap-3 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <h2 class="font-semibold text-white">Dữ liệu OCR đã chuẩn hóa</h2>
+                    <p class="mt-1 text-xs text-slate-400">Hiển thị các trường cố định theo loại giấy tờ.</p>
+                </div>
+                <span class="w-fit rounded-full bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+                    {{ count($allOcrLines) }} dòng OCR
+                </span>
+            </div>
+
+            <div class="p-5">
+                <div class="mb-5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-100">
+                    Hãy đối chiếu với ảnh gốc trước khi sử dụng: confidence thể hiện mức tự tin của mô hình, không bảo đảm dữ liệu hoàn toàn chính xác.
+                </div>
+
+                @if (data_get($documentType, 'normalized_value'))
+                    <div class="mb-5 rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                        <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Loại giấy tờ</span>
+                        <strong class="mt-1 block text-white">{{ data_get($displayProfile, 'document_label', data_get($documentType, 'normalized_value')) }}</strong>
+                    </div>
+                @endif
+
+                @if ($displayFields)
+                    <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        @foreach ($displayFields as $fieldName => $fieldLabel)
+                            @php($fieldData = data_get($structuredFields, $fieldName, []))
+                            <div class="rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                                <dt class="text-xs font-medium uppercase tracking-wide text-slate-500">
+                                    {{ $fieldLabel }}
+                                </dt>
+                                <dd class="mt-1 break-words font-medium text-slate-100">
+                                    {{ data_get($fieldData, 'normalized_value', data_get($fieldData, 'raw_value', 'Chưa nhận diện được')) }}
+                                </dd>
+                            </div>
+                        @endforeach
+                    </dl>
+                @else
+                    <p class="text-sm text-slate-400">Chưa xác định được loại giấy tờ để áp dụng bộ trường cố định.</p>
+                @endif
+
+                @if ($additionalStructuredFields || $verificationLines || $unmappedRawLines)
+                    <div class="mt-5 border-t border-white/10 pt-5">
+                        <h3 class="text-sm font-semibold text-white">Nội dung OCR chưa gán trường</h3>
+                        <p class="mt-1 text-xs text-slate-400">Các thông tin ngoài bộ trường cố định được giữ lại tại đây.</p>
+                        <ol class="mt-3 flex flex-col gap-2">
+                            @foreach ($additionalStructuredFields as $fieldName => $fieldData)
+                                <li class="rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                                    <p class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ str($fieldName)->replace('_', ' ')->title() }}</p>
+                                    <p class="mt-1 break-words text-sm text-slate-100">{{ data_get($fieldData, 'normalized_value', data_get($fieldData, 'raw_value', '—')) }}</p>
+                                </li>
+                            @endforeach
+                            @foreach ($verificationLines as $line)
+                                <li class="flex gap-3 rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                                    <span class="shrink-0 font-mono text-xs text-slate-500">#{{ data_get($line, 'index', '—') }}</span>
+                                    <p class="break-words text-sm text-slate-100">{{ data_get($line, 'text', '—') }}</p>
+                                </li>
+                            @endforeach
+                            @foreach ($unmappedRawLines as $line)
+                                <li class="flex gap-3 rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                                    <span class="shrink-0 font-mono text-xs text-slate-500">#{{ data_get($line, 'index', '—') }}</span>
+                                    <div class="min-w-0">
+                                        <p class="break-words text-sm text-slate-100">{{ data_get($line, 'text', '—') }}</p>
+                                        @if (is_numeric(data_get($line, 'confidence')))
+                                            <p class="mt-1 text-xs text-slate-500">Confidence: {{ number_format((float) data_get($line, 'confidence') * 100, 1) }}%</p>
+                                        @endif
+                                    </div>
+                                </li>
+                            @endforeach
+                        </ol>
+                    </div>
+                @endif
+            </div>
+        </section>
+
+        @if ($allOcrLines)
+            <section class="mt-7 overflow-hidden rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.04]">
+                <div class="border-b border-white/10 px-5 py-4">
+                    <h2 class="font-semibold text-white">Toàn bộ nội dung OCR đọc được</h2>
+                    <p class="mt-1 text-xs text-slate-400">Danh sách đầy đủ theo thứ tự mô hình đọc từ ảnh. Phần này bảo toàn cả các dòng đã chuẩn hóa lẫn chưa gán trường.</p>
+                </div>
+                <div class="max-h-[36rem] overflow-auto">
+                    <table class="min-w-full divide-y divide-white/10 text-left text-sm">
+                        <thead class="sticky top-0 bg-slate-950/95 text-xs uppercase tracking-wide text-slate-500 backdrop-blur">
+                            <tr>
+                                <th scope="col" class="px-5 py-3 font-medium">Dòng</th>
+                                <th scope="col" class="px-5 py-3 font-medium">Nội dung đọc được</th>
+                                <th scope="col" class="px-5 py-3 font-medium">Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-white/10">
+                            @foreach ($allOcrLines as $line)
+                                <tr class="align-top">
+                                    <td class="px-5 py-3 font-mono text-xs text-slate-500">#{{ data_get($line, 'index', '—') }}</td>
+                                    <td class="max-w-4xl break-words px-5 py-3 text-slate-100">{{ data_get($line, 'text', '—') }}</td>
+                                    <td class="whitespace-nowrap px-5 py-3 text-slate-400">
+                                        {{ is_numeric(data_get($line, 'confidence')) ? number_format((float) data_get($line, 'confidence') * 100, 1).'%' : '—' }}
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        @endif
+
+        <section class="mt-7 grid gap-4 lg:grid-cols-2">
+            <details class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                <summary class="cursor-pointer px-5 py-4 font-semibold text-white">Xem JSON chuẩn hóa</summary>
+                <pre class="max-h-[32rem] overflow-auto border-t border-white/10 bg-slate-950 p-5 text-xs leading-6 text-emerald-200">{{ json_encode($document->ocr_structured_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+            </details>
+
+            @if ($document->ocr_raw_data)
+                <details class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                    <summary class="cursor-pointer px-5 py-4 font-semibold text-white">Xem JSON OCR thô</summary>
+                    <pre class="max-h-[32rem] overflow-auto border-t border-white/10 bg-slate-950 p-5 text-xs leading-6 text-cyan-200">{{ json_encode($document->ocr_raw_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+                </details>
+            @endif
+        </section>
+    @endif
+
     <div class="mt-7 flex flex-wrap gap-3">
         @if ($document->processed_path)
             <a href="{{ route('documents.processed', $document) }}" download="document-{{ $document->id }}-processed.jpg" class="inline-flex h-11 items-center justify-center rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">

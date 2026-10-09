@@ -26,3 +26,8 @@ Route::get('/documents/{document}/processed', [
     DocumentController::class,
     'processed',
 ])->name('documents.processed');
+
+Route::get('/documents/{document}/face-crop', [
+    DocumentController::class,
+    'faceCrop',
+])->name('documents.face-crop');

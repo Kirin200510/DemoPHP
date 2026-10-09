@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from pathlib import Path
 
 
 # =========================================================
@@ -1255,6 +1256,122 @@ def find_document_against_background(
 
 
 # =========================================================
+# FALLBACK: OCR TEXT LAYOUT
+# =========================================================
+
+def find_document_from_text_layout(
+    image_path,
+    image_shape,
+):
+    """Suy ra khung giấy tờ từ bố cục vùng chữ khi biên vật lý bị mất.
+
+    Chỉ dùng sau toàn bộ nhánh cạnh/màu thất bại. Trường hợp bao nhựa phản
+    sáng, nền có vân hoặc tay che viền có thể khiến không còn tứ giác cạnh
+    đủ rõ; PP-OCRv5 detector vẫn thường xác định được nhiều vùng chữ thuộc
+    cùng một giấy tờ. Hàm này chỉ sử dụng polygon detector, không dùng nội
+    dung OCR hay giá trị nhận dạng của người dùng.
+    """
+
+    try:
+        from ocr_service import detect_text_lines
+
+        detected_lines = detect_text_lines(
+            Path(image_path)
+        )
+    except Exception as exception:
+        print(
+            "Text-layout fallback unavailable: "
+            f"{exception}"
+        )
+
+        return None, None
+
+    if len(detected_lines) < 6:
+        return None, None
+
+    polygons = [
+        np.asarray(
+            polygon,
+            dtype=np.float32,
+        )
+        for polygon, _ in detected_lines
+        if np.asarray(polygon).shape == (4, 2)
+    ]
+
+    if len(polygons) < 6:
+        return None, None
+
+    text_points = np.concatenate(
+        polygons,
+        axis=0,
+    )
+
+    rect = cv2.minAreaRect(
+        text_points
+    )
+
+    width, height = rect[1]
+
+    if width <= 0 or height <= 0:
+        return None, None
+
+    ratio = max(width, height) / min(width, height)
+    image_height, image_width = image_shape[:2]
+    text_area_ratio = (width * height) / (image_width * image_height)
+
+    if (
+        ratio < DOCUMENT_RATIO_MIN
+        or ratio > DOCUMENT_RATIO_MAX
+        or text_area_ratio < 0.04
+        or text_area_ratio > 0.65
+    ):
+        return None, None
+
+    # Vùng chữ nằm bên trong thẻ. Nới khung theo cả hai trục thay vì dùng
+    # bounding box ngang/dọc, nhờ đó vẫn giữ được phối cảnh/độ nghiêng.
+    text_box = cv2.boxPoints(
+        rect
+    )
+    center = text_box.mean(
+        axis=0,
+    )
+    document_box = center + (text_box - center) * 1.18
+
+    if extends_outside_image(
+        document_box,
+        image_shape,
+        tolerance_ratio=0.12,
+    ):
+        return None, None
+
+    debug_mask = np.zeros(
+        image_shape[:2],
+        dtype=np.uint8,
+    )
+    cv2.polylines(
+        debug_mask,
+        [
+            np.rint(
+                document_box
+            ).astype(
+                np.int32
+            )
+        ],
+        True,
+        255,
+        3,
+    )
+
+    print(
+        "Using OCR text-layout document fallback."
+    )
+
+    return order_points(
+        document_box
+    ), debug_mask
+
+
+# =========================================================
 # FALLBACK: PERSPECTIVE LINES
 # =========================================================
 
@@ -2050,6 +2167,18 @@ def find_min_area_fallback(
         if rectangularity < 0.40:
             continue
 
+        # Morphology có thể làm vùng màu dính sang nền, khiến minAreaRect
+        # phình ra ngoài ảnh. Một giấy tờ nhìn thấy đầy đủ không thể có bốn
+        # góc vượt biên nhiều như vậy; loại trước khi so điểm diện tích để
+        # ứng viên hợp lệ, nhỏ hơn, không bị lấn át.
+        if extends_outside_image(
+            cv2.boxPoints(
+                rect
+            ),
+            image.shape,
+        ):
+            continue
+
         score = (
             area
             * rectangularity
@@ -2163,6 +2292,127 @@ def find_min_area_fallback(
         return points, best_score
 
     return points
+
+
+# =========================================================
+# SAFE FALLBACK FOR DOCUMENT-LIKE INPUT FRAME
+# =========================================================
+
+def full_image_points(
+    image_shape
+):
+    """Trả về bốn góc toàn ảnh theo đúng thứ tự perspective crop."""
+
+    image_height, image_width = image_shape[:2]
+
+    return np.array(
+        [
+            [0, 0],
+            [image_width - 1, 0],
+            [image_width - 1, image_height - 1],
+            [0, image_height - 1]
+        ],
+        dtype=np.float32
+    )
+
+
+def is_partial_border_strip(
+    points,
+    image_shape
+):
+    """
+    Phát hiện fallback chỉ bắt một dải nội dung thay vì toàn bộ giấy tờ.
+
+    Trường hợp này thường xảy ra khi ảnh đầu vào đã là một thẻ gần kín
+    khung, nhưng mask màu chỉ thấy ảnh chân dung hoặc một vùng hoa văn. Dải
+    đó có thể vô tình đạt tỷ lệ giấy tờ nếu minAreaRect xoay theo chiều dọc.
+    """
+
+    image_height, image_width = image_shape[:2]
+
+    if image_height <= 0 or image_width <= 0:
+        return False
+
+    frame_ratio = image_width / image_height
+
+    if (
+        frame_ratio < DOCUMENT_RATIO_MIN
+        or frame_ratio > DOCUMENT_RATIO_MAX
+    ):
+        return False
+
+    ordered = order_points(
+        points
+    )
+
+    x, y, width, height = cv2.boundingRect(
+        ordered
+    )
+
+    image_area = image_width * image_height
+    candidate_area = cv2.contourArea(
+        ordered.reshape(-1, 1, 2)
+    )
+    area_ratio = candidate_area / image_area
+
+    border_margin = max(
+        2,
+        int(min(image_height, image_width) * 0.01)
+    )
+
+    touches_left = x <= border_margin
+    touches_top = y <= border_margin
+    touches_right = (
+        x + width
+        >= image_width - border_margin
+    )
+    touches_bottom = (
+        y + height
+        >= image_height - border_margin
+    )
+
+    vertical_strip = (
+        touches_top
+        and touches_bottom
+        and width < image_width * 0.72
+    )
+
+    horizontal_strip = (
+        touches_left
+        and touches_right
+        and height < image_height * 0.72
+    )
+
+    return (
+        area_ratio < 0.70
+        and (
+            vertical_strip
+            or horizontal_strip
+        )
+    )
+
+
+def extends_outside_image(
+    points,
+    image_shape,
+    tolerance_ratio=0.03,
+):
+    """Kiểm tra tứ giác fallback có vượt biên ảnh quá mức hợp lý hay không."""
+
+    image_height, image_width = image_shape[:2]
+    tolerance_x = image_width * tolerance_ratio
+    tolerance_y = image_height * tolerance_ratio
+    points = np.asarray(
+        points,
+        dtype=np.float32,
+    )
+
+    return bool(
+        np.any(points[:, 0] < -tolerance_x)
+        or np.any(points[:, 0] > image_width - 1 + tolerance_x)
+        or np.any(points[:, 1] < -tolerance_y)
+        or np.any(points[:, 1] > image_height - 1 + tolerance_y)
+    )
 
 
 # =========================================================
@@ -2286,6 +2536,7 @@ warm_points = None
 warm_score = None
 warm_mask = None
 used_cccd_hsv_fallback = False
+used_safe_full_frame = False
 
 
 # =========================================================
@@ -2568,6 +2819,32 @@ if points is None:
 
 
 # =========================================================
+# SAFE GUARD: PARTIAL BORDER STRIP
+# =========================================================
+
+if (
+    points is not None
+    and is_partial_border_strip(
+        points,
+        detection_image.shape
+    )
+):
+
+    print()
+    print(
+        "Rejected a partial border strip; "
+        "using the full document-like input frame."
+    )
+
+    points = full_image_points(
+        detection_image.shape
+    )
+
+    crop_padding_ratio = 0.0
+    used_safe_full_frame = True
+
+
+# =========================================================
 # METHOD 7: OCCLUDED EDGE / PERSPECTIVE FALLBACK
 # =========================================================
 
@@ -2576,7 +2853,7 @@ if points is None:
 # không ngăn các detector hình học phía sau được chạy.
 fallback_is_suspicious = points is None
 
-if points is not None:
+if points is not None and not used_safe_full_frame:
     fallback_x, fallback_y, fallback_width, fallback_height = cv2.boundingRect(
         points.astype(np.float32)
     )
@@ -2597,12 +2874,22 @@ if points is not None:
     )
 
     fallback_is_suspicious = (
-        touches_image_border >= 2
-        and (
-            fallback_width * fallback_height
-            >= detection_image.shape[0]
-            * detection_image.shape[1]
-            * 0.70
+        (
+            touches_image_border >= 2
+            and (
+                fallback_width * fallback_height
+                >= detection_image.shape[0]
+                * detection_image.shape[1]
+                * 0.70
+            )
+        )
+        or is_partial_border_strip(
+            points,
+            detection_image.shape
+        )
+        or extends_outside_image(
+            points,
+            detection_image.shape,
         )
     )
 
@@ -2684,6 +2971,60 @@ if points is None:
 
 
 # =========================================================
+# METHOD 9: OCR TEXT-LAYOUT FALLBACK
+# =========================================================
+
+if points is None:
+
+    print()
+    print(
+        "Trying OCR text-layout document fallback..."
+    )
+
+    text_layout_points, text_layout_mask = find_document_from_text_layout(
+        INPUT_IMAGE,
+        image.shape,
+    )
+
+    if text_layout_points is not None:
+        points = text_layout_points * scale
+        debug_mask = cv2.resize(
+            text_layout_mask,
+            (
+                detection_image.shape[1],
+                detection_image.shape[0],
+            ),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        crop_padding_ratio = 0.02
+
+
+# =========================================================
+# METHOD 10: SAFE FULL-FRAME FALLBACK
+# =========================================================
+
+if (
+    points is not None
+    and is_partial_border_strip(
+        points,
+        detection_image.shape
+    )
+):
+
+    print()
+    print(
+        "Rejected a partial border strip; "
+        "using the full document-like input frame."
+    )
+
+    points = full_image_points(
+        detection_image.shape
+    )
+
+    crop_padding_ratio = 0.0
+
+
+# =========================================================
 # COMPLETE FAILURE
 # =========================================================
 
@@ -2694,16 +3035,8 @@ if points is None:
         "using the full image as a safe fallback."
     )
 
-    detection_height, detection_width = detection_image.shape[:2]
-
-    points = np.array(
-        [
-            [0, 0],
-            [detection_width - 1, 0],
-            [detection_width - 1, detection_height - 1],
-            [0, detection_height - 1]
-        ],
-        dtype=np.float32
+    points = full_image_points(
+        detection_image.shape
     )
 
     if debug_mask is None:

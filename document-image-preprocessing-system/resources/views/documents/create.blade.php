@@ -13,7 +13,7 @@
                     Làm sạch ảnh giấy tờ chỉ với một lần tải lên.
                 </h1>
                 <p class="max-w-xl text-base leading-7 text-slate-400 sm:text-lg">
-                    Hệ thống tự động xác định vùng giấy tờ, crop, deskew, khử chói, khử mờ và tăng cường chất lượng ảnh.
+                    Hệ thống tự động xử lý ảnh, nhận dạng nội dung bằng OCR và trả về dữ liệu đã chuẩn hóa.
                 </p>
             </div>
             <div class="grid max-w-lg grid-cols-3 gap-3 text-center text-xs text-slate-400">
@@ -50,11 +50,11 @@
                     <button id="remove-selected-file" type="button" class="shrink-0 text-slate-400 transition hover:text-white">Chọn lại</button>
                 </div>
 
-                <button id="process-button" type="submit" class="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-wait disabled:opacity-70">
-                    <span id="process-button-label">Xử lý hình ảnh</span>
+                <button id="process-button" type="submit" disabled class="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-cyan-400 px-5 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-70 disabled:hover:bg-slate-700">
+                    <span id="process-button-label">Xử lý hình ảnh và OCR</span>
                     <span id="process-spinner" class="hidden size-5 animate-spin rounded-full border-2 border-slate-950/30 border-t-slate-950" aria-hidden="true"></span>
                 </button>
-                <p class="text-center text-xs text-slate-500">Quá trình xử lý có thể mất vài giây tùy kích thước ảnh.</p>
+                <p class="text-center text-xs text-slate-500">Quá trình xử lý ảnh và OCR có thể mất khoảng một phút.</p>
             </form>
         </div>
     </section>

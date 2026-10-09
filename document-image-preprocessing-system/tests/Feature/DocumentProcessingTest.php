@@ -21,7 +21,8 @@ class DocumentProcessingTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Xử lý hình ảnh')
-            ->assertSee('name="image"', false);
+            ->assertSee('name="image"', false)
+            ->assertSee('type="submit" disabled', false);
     }
 
     public function test_valid_image_is_processed_stored_and_recorded(): void
@@ -30,11 +31,7 @@ class DocumentProcessingTest extends TestCase
         Http::preventStrayRequests();
         config(['services.ai_engine.url' => 'http://ai-engine.test']);
         Http::fake([
-            'http://ai-engine.test/preprocess' => Http::response(
-                'processed-jpeg-content',
-                200,
-                ['Content-Type' => 'image/jpeg'],
-            ),
+            'http://ai-engine.test/process' => Http::response($this->successfulAiResponse()),
         ]);
 
         $response = $this->post(route('documents.store'), [
@@ -44,18 +41,45 @@ class DocumentProcessingTest extends TestCase
 
         $response
             ->assertRedirect(route('documents.show', $document))
-            ->assertSessionHas('success', 'Hình ảnh đã được xử lý và lưu thành công.');
+            ->assertSessionHas('success', 'Hình ảnh và dữ liệu OCR đã được xử lý, chuẩn hóa và lưu thành công.');
         $this->assertSame(ImageDocument::STATUS_COMPLETED, $document->status);
         $this->assertNotNull($document->processed_path);
+        $faceCropPath = $document->ocr_structured_data['face_crop']['stored_path'];
+        $this->assertSame('NGUYỄN VĂN A', $document->ocr_raw_data['full_text']);
+        $this->assertSame(
+            'Nguyễn Văn A',
+            $document->ocr_structured_data['fields']['full_name']['normalized_value'],
+        );
+        $this->assertSame(
+            '012345678901',
+            $document->ocr_structured_data['fields']['cccd_number']['normalized_value'],
+        );
         Storage::disk('local')->assertExists($document->original_path);
         Storage::disk('local')->assertExists($document->processed_path);
+        Storage::disk('local')->assertExists($faceCropPath);
         $this->assertSame(
             'processed-jpeg-content',
             Storage::disk('local')->get($document->processed_path),
         );
+        $this->assertSame(
+            'face-crop-jpeg-content',
+            Storage::disk('local')->get($faceCropPath),
+        );
         Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
-            && $request->url() === 'http://ai-engine.test/preprocess'
+            && $request->url() === 'http://ai-engine.test/process'
             && $request->hasFile('file', filename: 'cccd.png'));
+
+        $this->get(route('documents.show', $document))
+            ->assertOk()
+            ->assertSee('Dữ liệu OCR đã chuẩn hóa')
+            ->assertSee('Khuôn mặt được trích xuất')
+            ->assertSee('Toàn bộ nội dung OCR đọc được')
+            ->assertSee('Số/No')
+            ->assertSee('Nguyễn Văn A');
+
+        $this->get(route('documents.face-crop', $document))
+            ->assertOk()
+            ->assertContent('face-crop-jpeg-content');
     }
 
     public function test_ai_engine_failure_marks_document_as_failed_without_processed_image(): void
@@ -64,7 +88,7 @@ class DocumentProcessingTest extends TestCase
         Http::preventStrayRequests();
         config(['services.ai_engine.url' => 'http://ai-engine.test']);
         Http::fake([
-            'http://ai-engine.test/preprocess' => Http::response(
+            'http://ai-engine.test/process' => Http::response(
                 ['detail' => 'Pipeline failed'],
                 500,
             ),
@@ -82,6 +106,8 @@ class DocumentProcessingTest extends TestCase
             ]);
         $this->assertSame(ImageDocument::STATUS_FAILED, $document->status);
         $this->assertNull($document->processed_path);
+        $this->assertNull($document->ocr_raw_data);
+        $this->assertNull($document->ocr_structured_data);
         Storage::disk('local')->assertExists($document->original_path);
         Http::assertSentCount(1);
     }
@@ -111,5 +137,53 @@ class DocumentProcessingTest extends TestCase
                 true,
             ),
         );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function successfulAiResponse(): array
+    {
+        return [
+            'status' => 'completed',
+            'processed_image' => [
+                'filename' => 'document_final.jpg',
+                'media_type' => 'image/jpeg',
+                'base64' => base64_encode('processed-jpeg-content'),
+            ],
+            'ocr' => [
+                'raw' => [
+                    'status' => 'completed',
+                    'full_text' => 'NGUYỄN VĂN A',
+                    'lines' => [
+                        [
+                            'index' => 0,
+                            'text' => 'NGUYỄN VĂN A',
+                            'confidence' => 0.95,
+                        ],
+                    ],
+                ],
+                'structured' => [
+                    'status' => 'completed',
+                    'document' => [
+                        'normalized_value' => 'Căn cước công dân / Citizen Identity Card',
+                    ],
+                    'fields' => [
+                        'full_name' => [
+                            'normalized_value' => 'Nguyễn Văn A',
+                            'confidence' => 0.95,
+                        ],
+                        'cccd_number' => [
+                            'normalized_value' => '012345678901',
+                            'confidence' => 0.95,
+                        ],
+                    ],
+                ],
+            ],
+            'face_crop' => [
+                'media_type' => 'image/jpeg',
+                'base64' => base64_encode('face-crop-jpeg-content'),
+            ],
+        ];
     }
 }

@@ -26,7 +26,10 @@ os.makedirs(
 # RUN SCRIPT
 # =========================================================
 
-def run_script(script_name):
+def run_script(
+    script_name,
+    *script_arguments
+):
 
     script_path = os.path.join(
         BASE_DIR,
@@ -44,7 +47,11 @@ def run_script(script_name):
     print("=" * 60)
 
     subprocess.run(
-        [sys.executable, script_path],
+        [
+            sys.executable,
+            script_path,
+            *script_arguments,
+        ],
         cwd=BASE_DIR,
         check=True
     )
@@ -112,6 +119,10 @@ if not os.path.exists(input_path):
     )
 
 os.environ["PIPELINE_INPUT"] = input_path
+os.environ["OCR_RESULT_NAME"] = "current"
+os.environ["OCR_INPUT_STAGE"] = "preprocessed_final"
+os.environ["OCR_RAW_OUTPUT_FILENAME"] = "ocr_raw_result.json"
+os.environ["OCR_STRUCTURED_OUTPUT_FILENAME"] = "ocr_structured_result.json"
 
 print()
 print("=" * 60)
@@ -208,6 +219,38 @@ check_output(
 
 
 # =========================================================
+# STEP 7
+# OCR FROM FINAL PREPROCESSED IMAGE
+# =========================================================
+
+run_script(
+    "test_ocr.py",
+    "output/document_final.jpg"
+)
+
+check_output(
+    "output/ocr_raw_result.json"
+)
+
+
+# =========================================================
+# STEP 8
+# Structured OCR fields + face crop
+# =========================================================
+
+run_script(
+    "test_structured_extraction.py",
+    "output/ocr_raw_result.json",
+    "output/document_final.jpg",
+    "current",
+)
+
+check_output(
+    "output/ocr_structured_result.json"
+)
+
+
+# =========================================================
 # FINAL
 # =========================================================
 
@@ -237,6 +280,30 @@ print(
     os.path.join(
         OUTPUT_DIR,
         "document_final.jpg"
+    )
+)
+
+print()
+print(
+    "OCR output:"
+)
+
+print(
+    os.path.join(
+        OUTPUT_DIR,
+        "ocr_raw_result.json"
+    )
+)
+
+print()
+print(
+    "Structured OCR output:"
+)
+
+print(
+    os.path.join(
+        OUTPUT_DIR,
+        "ocr_structured_result.json"
     )
 )
 

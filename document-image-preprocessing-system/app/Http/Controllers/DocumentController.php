@@ -46,15 +46,32 @@ class DocumentController extends Controller
         ]);
 
         try {
-            $processedImage = $imageProcessor->process($image);
+            $processingResult = $imageProcessor->process($image);
             $processedPath = 'documents/processed/'.Str::uuid().'.jpg';
+            $faceCropPath = null;
 
-            if (! Storage::disk('local')->put($processedPath, $processedImage)) {
+            if (! Storage::disk('local')->put($processedPath, $processingResult['processed_image'])) {
                 throw new RuntimeException('Không thể lưu hình ảnh sau khi xử lý.');
+            }
+
+            if ($processingResult['face_crop_image'] !== null) {
+                $faceCropPath = 'documents/faces/'.Str::uuid().'.jpg';
+
+                if (! Storage::disk('local')->put($faceCropPath, $processingResult['face_crop_image'])) {
+                    throw new RuntimeException('Không thể lưu ảnh khuôn mặt đã trích xuất.');
+                }
+            }
+
+            $structuredOcr = $processingResult['structured_ocr'];
+
+            if ($faceCropPath !== null) {
+                $structuredOcr['face_crop']['stored_path'] = $faceCropPath;
             }
 
             $document->update([
                 'processed_path' => $processedPath,
+                'ocr_raw_data' => $processingResult['raw_ocr'],
+                'ocr_structured_data' => $structuredOcr,
                 'status' => ImageDocument::STATUS_COMPLETED,
             ]);
         } catch (Throwable $exception) {
@@ -74,7 +91,7 @@ class DocumentController extends Controller
 
         return redirect()
             ->route('documents.show', $document)
-            ->with('success', 'Hình ảnh đã được xử lý và lưu thành công.');
+            ->with('success', 'Hình ảnh và dữ liệu OCR đã được xử lý, chuẩn hóa và lưu thành công.');
     }
 
     public function show(ImageDocument $document): View
@@ -94,6 +111,17 @@ class DocumentController extends Controller
         }
 
         return $this->imageResponse($document->processed_path);
+    }
+
+    public function faceCrop(ImageDocument $document): BinaryFileResponse
+    {
+        $faceCropPath = data_get($document->ocr_structured_data, 'face_crop.stored_path');
+
+        if (! is_string($faceCropPath) || ! str_starts_with($faceCropPath, 'documents/faces/')) {
+            abort(404);
+        }
+
+        return $this->imageResponse($faceCropPath);
     }
 
     private function imageResponse(string $path): BinaryFileResponse
