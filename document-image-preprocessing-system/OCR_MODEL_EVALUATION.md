@@ -1,65 +1,48 @@
-# Đánh giá model OCR pretrained
+# Đánh giá và lựa chọn OCR model
 
-## 1. Mô tả đánh giá
+## Mục tiêu
 
-Mục tiêu là đọc tối đa nội dung trên CCCD/GPLX đã qua crop, deskew, khử chói, khử mờ và tăng tương phản. OCR phải giữ được polygon của dòng chữ, nội dung tiếng Việt có dấu và điểm tin cậy để hệ thống đánh dấu kết quả cần kiểm tra.
+OCR phải đọc tối đa nội dung tiếng Việt trên ảnh giấy tờ đã qua pipeline tiền xử lý, đồng thời giữ tọa độ polygon để chuẩn hóa dữ liệu theo bố cục. Kết quả OCR không được xem là dữ liệu đã xác thực: confidence chỉ hỗ trợ đối chiếu với ảnh gốc.
 
-Kết quả thử nghiệm trên các ảnh `4.jpg`, `5.jpg` và `18.jpg` cho thấy recognizer Latin đa ngôn ngữ làm mất hoặc nhầm nhiều dấu tiếng Việt. Do đó hệ thống chốt pipeline ghép hai model pretrained có vai trò riêng:
+## Tổ hợp đang chạy
 
 ```text
 document_final.jpg
-    │
-    ├─ PP-OCRv5_server_det: tìm polygon từng dòng chữ
-    │
-    └─ VietOCR vgg_transformer: đọc tiếng Việt từ từng polygon đã crop
+  -> PP-OCRv5_server_det: polygon + detection confidence
+  -> perspective warp từng polygon
+  -> VietOCR vgg_transformer: text tiếng Việt + recognition confidence
+  -> structured_extraction.py: nhận diện loại giấy tờ, gán field, ghép địa chỉ nhiều dòng
 ```
 
-## 2. Phân tích model
+`pipeline.py` luôn OCR trên `output/document_final.jpg`, không OCR trực tiếp ảnh gốc. `ocr_service.py` khóa inference để bảo vệ việc tái sử dụng model trong process hiện tại.
 
-### PP-OCRv5_server_det — Text detection
+## So sánh theo vai trò
 
-PP-OCRv5_server_det chỉ đảm nhận phát hiện vị trí các dòng chữ. Model trả về polygon bốn điểm và confidence detection; ảnh trong polygon được nắn thẳng bằng perspective transform trước khi gửi sang VietOCR.
+| Thành phần | Model | Input | Output | Lý do chọn | Giới hạn |
+| --- | --- | --- | --- | --- | --- |
+| Text detection | `PP-OCRv5_server_det` | Ảnh đã tiền xử lý | Polygon 4 điểm, detection confidence | Định vị dòng/vùng chữ và giữ bố cục để chuẩn hóa | Không tự đọc text; polygon sai hoặc thiếu sẽ làm recognizer mất nội dung |
+| Text recognition | `VietOCR vgg_transformer` | Ảnh dòng chữ đã nắn thẳng | Text, recognition confidence | Pretrained hướng tiếng Việt, phù hợp hơn recognizer Latin tổng quát trong các lần kiểm thử của project | Không tự phát hiện text; có thể sai trên ảnh nhỏ, mờ, chói, chữ bị che hoặc số sát nhau |
 
-**Ưu điểm**
+## Cách triển khai hiện tại
 
-- Pretrained, chạy local bằng ONNX Runtime trên CPU.
-- Tìm được nhiều vùng chữ nhỏ trên CCCD/GPLX và trả polygon để giữ vị trí trên ảnh.
-- Tách detector khỏi recognizer giúp có thể dùng recognizer chuyên tiếng Việt mà không mất khả năng định vị text.
+### PP-OCRv5_server_det
 
-**Hạn chế**
+Detector được PaddleX khởi tạo với `device="cpu"` và `engine="onnxruntime"`. Mỗi polygon được nới nhẹ, sau đó `cv2.getPerspectiveTransform`/`cv2.warpPerspective` nắn thành một ảnh dòng chữ trước khi gửi sang recognizer. Bước nới biên giúp giảm nguy cơ cắt mất dấu tiếng Việt sát mép polygon.
 
-- Không đọc nội dung chữ; không thể tự cung cấp text hay confidence nhận dạng.
-- Chất lượng polygon quyết định trực tiếp chất lượng crop dòng chữ đưa vào VietOCR.
-- Không tự hiểu field nghiệp vụ như họ tên, số giấy tờ hoặc ngày sinh.
+Thông thường detector chạy tại bước OCR chính. Riêng khi `test_document_crop.py` không xác định được giấy tờ bằng các fallback hình học, nhánh OCR text-layout có thể gọi detector sớm để bao vùng chữ và suy ra khung giấy tờ. Sau khi crop hoàn tất, detector vẫn chạy lại trên `document_final.jpg` cho OCR chính; đây là fallback định vị giấy tờ, không phải một recognizer thứ hai.
 
-### VietOCR vgg_transformer — Text recognition tiếng Việt
+### VietOCR vgg_transformer
 
-VietOCR là recognizer Transformer pretrained cho tiếng Việt. Model nhận một ảnh dòng chữ đã crop và trả chuỗi văn bản cùng confidence recognition.
+Recognizer dùng cấu hình `vgg_transformer`, chạy CPU qua PyTorch. Lần đầu thiếu cache, service khởi tạo model pretrained rồi lưu config/weight vào `ai-engine/model-cache/vietocr/`; các lần sau tái sử dụng cache và instance đã nạp trong process.
 
-**Ưu điểm**
+## Dữ liệu trả về
 
-- Huấn luyện hướng đến chữ tiếng Việt, giữ dấu tốt hơn recognizer Latin đa ngôn ngữ trong các thử nghiệm hiện tại.
-- Đọc đúng các dòng tiêu đề như `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM` và `Độc lập - Tự do - Hạnh phúc` trên cả ba ảnh benchmark.
-- Chạy local bằng PyTorch CPU; không gửi ảnh giấy tờ sang dịch vụ bên ngoài.
+Raw OCR gồm `full_text` và từng dòng: `text`, `confidence`, `detection_confidence`, `polygon`. `structured_extraction.py` dùng các dòng này để:
 
-**Hạn chế**
+- Nhận diện CCCD, giấy phép lái xe hoặc giấy chứng nhận đăng ký xe từ tiêu đề/nhãn.
+- Ghép nhãn với giá trị cùng hàng, bên phải hoặc ở hàng tiếp theo theo polygon.
+- Ghép địa chỉ nhiều dòng trong vùng bố cục phù hợp.
+- Chuẩn hóa bảo thủ số, ngày và một số nhiễu ký tự; vẫn giữ `raw_value`, `source_line_indexes` và `unmapped_raw_lines` để truy vết.
+- Dùng YuNet độc lập với OCR để crop khuôn mặt khi phát hiện được.
 
-- Không có detector: bắt buộc cần PP-OCRv5_server_det cung cấp polygon.
-- Tốn RAM và chậm hơn recognizer ONNX nhẹ khi chạy CPU.
-- Vẫn có thể sai chữ rất nhỏ, vùng chói, số sát nhau hoặc ảnh mờ; confidence cao không bảo đảm tuyệt đối đúng.
-
-## 3. Bảng so sánh
-
-| Thành phần | Model được chọn | Input | Output | Vai trò trong hệ thống | Điểm mạnh | Hạn chế chính |
-| --- | --- | --- | --- | --- | --- | --- |
-| Detection | `PP-OCRv5_server_det` | Ảnh tài liệu đã tiền xử lý | Polygon + detection confidence | Xác định từng vùng/dòng chữ | Định vị text tốt, ONNX CPU | Không đọc nội dung |
-| Recognition | `VietOCR vgg_transformer` | Ảnh từng dòng đã crop theo polygon | Text + recognition confidence | Đọc chữ tiếng Việt có dấu | Chuyên tiếng Việt, giữ dấu tốt hơn trong benchmark | Không tự tìm text, chậm hơn trên CPU |
-
-## 4. Quyết định
-
-Hệ thống sử dụng duy nhất tổ hợp sau cho OCR mặc định:
-
-- **Detector:** `PP-OCRv5_server_det`.
-- **Recognizer:** `VietOCR vgg_transformer`.
-
-Kết quả raw OCR lưu mỗi dòng gồm `text`, `confidence` (recognition), `detection_confidence` và `polygon`. Chưa tự sửa giá trị cá nhân hoặc tự bóc tách field; các kết quả confidence thấp cần được giao diện hoặc người dùng kiểm tra lại.
+Kết quả OCR/chuẩn hóa cần được khách hàng đối chiếu và có thể chỉnh sửa trước khi gửi hồ sơ để nhân viên xác thực.

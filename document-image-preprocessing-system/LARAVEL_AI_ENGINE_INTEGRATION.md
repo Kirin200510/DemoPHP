@@ -1,129 +1,106 @@
-# Tích hợp AI Engine với Laravel
+# Tích hợp Laravel với AI Engine
 
-Tài liệu này mô tả cách source Laravel tích hợp với FastAPI trong `ai-engine` để người dùng tải ảnh lên giao diện, xử lý ảnh và xem/tải kết quả.
+Laravel là lớp giao diện, xác thực/phân quyền và lưu trữ hồ sơ. FastAPI trong `ai-engine/` chỉ xử lý ảnh, OCR và chuẩn hóa. Luồng tích hợp đang sử dụng endpoint `POST /process`, không dùng `/preprocess`.
 
-## Kiến trúc
+## Luồng upload thực tế
 
 ```text
-Trình duyệt
-    │ POST /documents (image)
-    ▼
-Laravel DocumentController
-    ├─ Validate upload
-    ├─ Lưu ảnh gốc vào private storage
-    ├─ Tạo ImageDocument: status = processing
-    ▼
-AiImageProcessor
-    │ POST http://127.0.0.1:8000/preprocess (multipart field: file)
-    ▼
-FastAPI AI Engine
-    │ JPEG cuối cùng
-    ▼
-Laravel
-    ├─ Lưu JPEG kết quả vào private storage
-    ├─ Cập nhật MySQL: processed_path, status = completed
-    └─ Redirect đến trang kết quả
+Customer đã đăng nhập
+  -> POST /documents
+  -> StoreDocumentRequest validate file
+  -> lưu ảnh gốc private + tạo ImageDocument (status=processing)
+  -> AiImageProcessor POST {AI_ENGINE_URL}/process, multipart field `file`
+  -> FastAPI chạy pipeline đầy đủ và trả JSON
+  -> Laravel lưu ảnh kết quả, face crop (nếu có), raw OCR và structured OCR
+  -> ImageDocument chuyển status=completed
+  -> redirect /documents/{document}
 ```
+
+Nếu AI Engine, payload JSON/base64 hoặc thao tác lưu file lỗi, Laravel chuyển hồ sơ sang `failed`, ghi lỗi kỹ thuật vào `storage/logs/laravel.log` và chỉ báo thông điệp tổng quát trên UI.
+
+## Payload AI Engine được Laravel sử dụng
+
+`AiImageProcessor` yêu cầu payload thành công có cấu trúc sau:
+
+```json
+{
+  "status": "completed",
+  "processed_image": {
+    "filename": "document_final.jpg",
+    "media_type": "image/jpeg",
+    "base64": "..."
+  },
+  "ocr": {
+    "raw": {},
+    "structured": {}
+  },
+  "face_crop": null
+}
+```
+
+`face_crop` chỉ có `media_type: image/jpeg` và `base64` khi YuNet phát hiện được khuôn mặt. Laravel không dùng các file debug trong `ai-engine/output/` làm lịch sử hồ sơ.
+
+## Các endpoint FastAPI
+
+| Endpoint | Mục đích | Laravel UI sử dụng |
+| --- | --- | --- |
+| `GET /health` | Kiểm tra AI Engine hoạt động | Không gọi tự động |
+| `POST /process` | Tiền xử lý + OCR + chuẩn hóa + face crop; trả JSON/base64 | Có |
+| `POST /ocr` | Raw OCR trực tiếp trên ảnh upload, không tiền xử lý | Không |
+| `POST /preprocess` | Chạy pipeline và trả riêng JPEG cuối | Không |
+
+AI Engine chỉ nhận `.jpg`, `.jpeg`, `.png`, `.webp`; các request pipeline được tuần tự hóa bởi lock vì output debug dùng tên file cố định. Timeout phía FastAPI là 300 giây; timeout Laravel lấy từ `AI_ENGINE_TIMEOUT` (mặc định 360 giây).
 
 ## Thành phần Laravel
 
-| Thành phần | Vai trò |
+| Thành phần | Vai trò thực tế |
 | --- | --- |
-| `routes/web.php` | Khai báo upload, xem chi tiết, xem ảnh gốc và ảnh kết quả |
-| `DocumentController` | Điều phối HTTP: lưu ảnh, gọi AI, cập nhật database, trả giao diện |
-| `StoreDocumentRequest` | Kiểm tra file ảnh đầu vào |
-| `AiImageProcessor` | Client HTTP chuyên gọi FastAPI `/preprocess` |
-| `ImageDocument` | Model lưu metadata/path và trạng thái xử lý |
-| `resources/views/documents/create.blade.php` | Form chọn ảnh, preview và nút xử lý |
-| `resources/views/documents/show.blade.php` | So sánh ảnh gốc với ảnh sau xử lý |
+| `routes/web.php` | Route hồ sơ, ảnh private, review, admin và quick login local/testing |
+| `DocumentController` | Lưu file, gọi AI Engine, chuyển trạng thái, kiểm tra Policy và audit log |
+| `StoreDocumentRequest` | Chỉ nhận JPG/JPEG/PNG/WEBP, tối đa 10 MB |
+| `AiImageProcessor` | HTTP client gọi `/process`, kiểm tra JSON/media type/base64 |
+| `ImageDocument` | Metadata, owner/reviewer, trạng thái, path, raw/structured OCR |
+| `ImageDocumentPolicy` | Kiểm soát quyền trên từng hồ sơ và face crop |
+| `AdminController` | Xem/gán role, bật/tắt tài khoản và xem audit log |
 
-## Route giao diện
+## Route ứng dụng
 
-| Method | URL | Tên route | Chức năng |
+Tất cả route hồ sơ và admin nằm sau middleware `auth` và `active`.
+
+| Method | URL | Route name | Kiểm tra chính |
 | --- | --- | --- | --- |
-| `GET` | `/` | `documents.create` | Trang chọn/tải ảnh |
-| `POST` | `/documents` | `documents.store` | Upload và xử lý; giới hạn 10 request/phút |
-| `GET` | `/documents/{document}` | `documents.show` | Trang kết quả |
-| `GET` | `/documents/{document}/original` | `documents.original` | Đọc ảnh gốc từ private storage |
-| `GET` | `/documents/{document}/processed` | `documents.processed` | Đọc ảnh kết quả từ private storage |
+| `GET` | `/` | `documents.create` | Người dùng đã đăng nhập |
+| `POST` | `/documents` | `documents.store` | Policy `create`, throttle 10/phút |
+| `GET` | `/documents/{document}` | `documents.show` | Policy `view` |
+| `GET` | `/documents/{document}/original` | `documents.original` | Policy `view` |
+| `GET` | `/documents/{document}/processed` | `documents.processed` | Policy `view` |
+| `GET` | `/documents/{document}/face-crop` | `documents.face-crop` | Policy `viewFaceCrop` |
+| `PUT` | `/documents/{document}/ocr` | `documents.ocr.update` | Chủ hồ sơ, status hợp lệ |
+| `POST` | `/documents/{document}/submit-review` | `documents.submit-review` | Chủ hồ sơ, status hợp lệ |
+| `POST` | `/documents/{document}/verify` | `documents.verify` | Processor/Reviewer, `pending_review` |
+| `POST` | `/documents/{document}/request-resubmission` | `documents.request-resubmission` | Processor/Reviewer, `pending_review` |
+| `GET` | `/admin/users` | `admin.users` | Role `admin` |
+| `PUT` | `/admin/users/{user}/access` | `admin.users.access` | Role `admin` |
+| `GET` | `/admin/audit-logs` | `admin.audit-logs` | Role `admin` |
 
-## Luồng xử lý upload
+Fortify đăng ký các route login/register/forgot-password/reset-password của package. `POST /login/quick/{role}` chỉ hoạt động trong môi trường `local` hoặc `testing`.
 
-### 1. Kiểm tra ảnh
+## Database và private storage
 
-`StoreDocumentRequest` yêu cầu trường `image`:
+MySQL không lưu binary ảnh. Bảng `image_documents` lưu owner, trạng thái và các đường dẫn/JSON sau:
 
-- Bắt buộc có file.
-- Phải là ảnh hợp lệ.
-- Chỉ nhận JPG, JPEG, PNG và WEBP.
-- Dung lượng tối đa 10 MB.
-
-### 2. Lưu ảnh gốc và tạo bản ghi
-
-Controller lưu file gốc vào disk `local`:
-
-```text
-storage/app/private/documents/originals/<tên-ngẫu-nhiên>.<phần-mở-rộng>
-```
-
-Sau đó Laravel tạo bản ghi trong bảng `image_documents`:
-
-```text
-original_path = đường dẫn tương đối của ảnh gốc
-processed_path = null
-status = processing
-```
-
-### 3. Gọi FastAPI
-
-`AiImageProcessor` mở file upload và gửi multipart request. Tên field bắt buộc là `file`, vì FastAPI khai báo `file: UploadFile = File(...)`.
-
-```text
-POST {AI_ENGINE_URL}/preprocess
-Accept: image/jpeg
-Content-Type: multipart/form-data
-
-file: <ảnh người dùng tải lên>
-```
-
-Client có timeout kết nối mặc định 5 giây và timeout toàn bộ request mặc định 360 giây. Phản hồi lỗi HTTP của AI engine được chuyển thành exception; response thành công phải có `Content-Type: image/jpeg` và body không rỗng.
-
-### 4. Lưu ảnh kết quả và cập nhật MySQL
-
-Khi AI trả JPEG, Laravel ghi file tại:
-
-```text
-storage/app/private/documents/processed/<uuid>.jpg
-```
-
-Sau đó cập nhật bản ghi:
-
-```text
-processed_path = documents/processed/<uuid>.jpg
-status = completed
-```
-
-Nếu có lỗi trong lúc xử lý, status chuyển thành `failed`, user được chuyển về trang chi tiết cùng thông báo lỗi. Lỗi kỹ thuật được ghi vào Laravel log.
-
-## Database và storage
-
-### Bảng `image_documents`
-
-| Cột | Ý nghĩa |
+| Dữ liệu | Nơi lưu |
 | --- | --- |
-| `id` | Mã bản ghi |
-| `original_path` | Đường dẫn ảnh gốc trong private storage |
-| `processed_path` | Đường dẫn ảnh kết quả; `null` nếu chưa thành công |
-| `status` | `processing`, `completed` hoặc `failed` |
-| `created_at`, `updated_at` | Thời điểm tạo/cập nhật |
+| Ảnh gốc | `storage/app/private/documents/originals/` |
+| Ảnh kết quả | `storage/app/private/documents/processed/` |
+| Khuôn mặt crop | `storage/app/private/documents/faces/` |
+| OCR raw | `image_documents.ocr_raw_data` (JSON) |
+| OCR structured | `image_documents.ocr_structured_data` (JSON) |
+| Chủ hồ sơ/reviewer/trạng thái/lý do | cột `user_id`, `reviewed_by`, `reviewed_at`, `review_notes`, `status` |
 
-MySQL **không lưu binary JPEG**. Database chỉ lưu metadata và đường dẫn; file thật nằm trong `storage/app/private`. Điều này tránh làm database phình to và cho phép Laravel kiểm soát việc trả ảnh qua controller.
+Ảnh được trả qua controller sau Policy, với `Cache-Control: private, no-store` và `X-Content-Type-Options: nosniff`. Không tạo symlink public cho private storage.
 
-Các response ảnh có header `Cache-Control: private, no-store` và `X-Content-Type-Options: nosniff`.
-
-## Cấu hình
-
-Trong `.env`:
+## Cấu hình cần có
 
 ```dotenv
 AI_ENGINE_URL=http://127.0.0.1:8000
@@ -131,56 +108,4 @@ AI_ENGINE_CONNECT_TIMEOUT=5
 AI_ENGINE_TIMEOUT=360
 ```
 
-Laravel đọc các giá trị này qua `config/services.php`, không gọi `env()` trực tiếp trong code ứng dụng.
-
-## Khởi động local
-
-Mở hai terminal riêng:
-
-```bash
-# Terminal 1: AI engine
-cd /home/user/document-image-preprocessing-system/ai-engine
-source venv/bin/activate
-uvicorn app:app --host 127.0.0.1 --port 8000
-```
-
-```bash
-# Terminal 2: Laravel
-cd /home/user/document-image-preprocessing-system
-php artisan migrate
-php artisan serve --host=127.0.0.1 --port=8001
-```
-
-Mở `http://127.0.0.1:8001` để dùng giao diện. Không chạy Laravel ở cổng 8000 vì cổng này dành cho AI engine.
-
-## Migration cần thiết
-
-Trước khi chạy, thực hiện:
-
-```bash
-php artisan migrate
-```
-
-Bảng cần có cột `processed_path`. Migration `2026_10_07_043151_ensure_processed_path_exists_on_image_documents_table.php` là migration sửa lỗi an toàn: chỉ bổ sung cột nếu database cũ chưa có cột này. Không dùng `migrate:fresh` trên database có dữ liệu vì lệnh đó xóa bảng.
-
-## Kiểm tra dữ liệu đã lưu
-
-```bash
-mysql -h 127.0.0.1 -u laravel -p document_image_preprocessing
-```
-
-```sql
-SELECT id, original_path, processed_path, status, created_at
-FROM image_documents
-ORDER BY id DESC;
-```
-
-Một ảnh xử lý thành công có `status = 'completed'`, `processed_path` khác `NULL`, và file tương ứng phải tồn tại trong `storage/app/private/documents/processed/`.
-
-## Lưu ý vận hành
-
-- Pipeline FastAPI hiện xử lý tuần tự vì dùng output trung gian có tên cố định.
-- Upload/AI processing chạy đồng bộ trong HTTP request; người dùng chờ cho đến khi pipeline trả kết quả.
-- Các route hiện không có middleware xác thực. Nếu triển khai cho nhiều người dùng hoặc ảnh giấy tờ thật, cần bổ sung đăng nhập, authorization và giới hạn quyền xem từng bản ghi.
-- Không đưa `storage/app/private/documents` ra public bằng symlink; ảnh được trả qua controller để giữ private.
-
+`config/services.php` đọc các biến này. Các bước chạy đầy đủ, database, Vite và SMTP được ghi trong [RUN_PROJECT.md](RUN_PROJECT.md).

@@ -35,9 +35,9 @@ Pipeline không dùng UVDoc. `orientation_corrected.jpg` chỉ là output trung 
 | `GET /health` | Trả `status: ok` để kiểm tra server |
 | `POST /process` | Pipeline đầy đủ được Laravel sử dụng |
 | `POST /ocr` | OCR trực tiếp ảnh upload, không chạy tiền xử lý |
-| `POST /preprocess` | Chỉ tiền xử lý và trả ảnh JPEG |
+| `POST /preprocess` | Chạy cùng pipeline đầy đủ nhưng chỉ trả file JPEG cuối, không trả OCR JSON |
 
-AI Engine nhận `.jpg`, `.jpeg`, `.png`, `.webp`. File upload được đặt tạm trong `ai-engine/tmp/` rồi xóa. Vì pipeline sử dụng các output chung trong `ai-engine/output/`, `asyncio.Lock` chỉ cho một request chạy tại một thời điểm.
+AI Engine nhận `.jpg`, `.jpeg`, `.png`, `.webp`. File upload được đặt tạm trong `ai-engine/tmp/` rồi xóa. Vì pipeline sử dụng các output chung trong `ai-engine/output/`, `asyncio.Lock` chỉ cho một lượt chạy pipeline đầy đủ (`/process` hoặc `/preprocess`) tại một thời điểm. Endpoint `/ocr` không dùng lock này; OCR trực tiếp dùng `_ocr_predict_lock` riêng trong `ocr_service.py`.
 
 ## 3. Các bước tiền xử lý
 
@@ -57,6 +57,8 @@ AI Engine nhận `.jpg`, `.jpeg`, `.png`, `.webp`. File upload được đặt t
 ### 3.2 Xác định góc và perspective crop
 
 `test_document_crop.py` dùng OpenCV với nhiều nhánh fallback hình học, không dùng YOLO và không dùng model detect tài liệu chuyên biệt. Các nhánh kết hợp Canny/morphology, contour tứ giác, mask HSV/LAB theo màu giấy tờ, `minAreaRect`, đường Hough và bố cục vùng chữ. Ứng viên được chấm theo diện tích, tỷ lệ thẻ, độ chữ nhật, góc và mức hợp lý so với ảnh.
+
+Khi các nhánh hình học không tìm được khung tin cậy, fallback bố cục chữ gọi `detect_text_lines()` của PP-OCRv5 để lấy các polygon text, bao vùng text bằng `minAreaRect` rồi suy ra khung giấy tờ. Vì vậy ở trường hợp fallback này PP-OCRv5 detector chạy một lần trong bước crop; sau đó bước OCR chính vẫn chạy detector lại trên `document_final.jpg` để đọc toàn bộ nội dung.
 
 Nếu tìm được bốn điểm, điểm được sắp theo thứ tự trên-trái, trên-phải, dưới-phải, dưới-trái rồi dùng `cv2.getPerspectiveTransform` + `cv2.warpPerspective` để crop và làm phẳng. Nếu không có khung đủ tin cậy, hệ thống giữ toàn ảnh thay vì cắt mất nội dung.
 
@@ -120,4 +122,4 @@ source venv/bin/activate
 python pipeline.py input/cccd_1.jpg
 ```
 
-Output debug dùng chung và có thể bị ghi đè ở lượt chạy sau. Lịch sử thật của từng hồ sơ nằm trong private storage và MySQL do Laravel quản lý.
+Output debug dùng chung và có thể bị ghi đè ở lượt chạy sau. Lịch sử thật của từng hồ sơ nằm trong private storage và MySQL do Laravel quản lý. Khi chạy qua giao diện Laravel, không dùng `/preprocess`; ứng dụng luôn gọi `/process` để nhận cả ảnh, OCR và metadata face crop trong một response JSON.

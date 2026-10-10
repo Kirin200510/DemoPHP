@@ -1,6 +1,6 @@
 # Nghiệp vụ xác thực và phân quyền
 
-Tài liệu này mô tả đúng cơ chế đang có trong project Laravel hiện tại. Xác thực tài khoản dùng **Laravel Fortify**, phân quyền dùng **Spatie Laravel Permission**, còn quyền trên từng hồ sơ được kiểm tra bằng **`ImageDocumentPolicy`** và middleware `auth`/`active`.
+Tài liệu này mô tả đúng cơ chế đang có trong project Laravel hiện tại. Xác thực tài khoản dùng **Laravel Fortify**, phân quyền dùng **Spatie Laravel Permission**, còn quyền trên từng hồ sơ được kiểm tra bằng **`ImageDocumentPolicy`** và middleware `auth`/`active`. Khu vực quản trị còn có middleware `role:admin`.
 
 ## 1. Vai trò hiện có
 
@@ -9,7 +9,7 @@ Tài liệu này mô tả đúng cơ chế đang có trong project Laravel hiệ
 | `customer` | Upload, xem và chỉnh sửa hồ sơ của chính mình; gửi hồ sơ chờ xác thực |
 | `processor` | Xem hồ sơ đang `pending_review`, đối chiếu và xác thực hoặc yêu cầu gửi lại |
 | `reviewer` | Có quyền xử lý hàng đợi giống `processor` (vai trò được seeder tạo sẵn) |
-| `admin` | Đọc hồ sơ toàn hệ thống, quản lý tài khoản/vai trò và audit log; không upload hoặc xử lý hồ sơ trên UI |
+| `admin` | Policy cho phép đọc mọi hồ sơ theo ID, quản lý tài khoản/vai trò và audit log; không upload hoặc xử lý hồ sơ trên UI |
 
 Tài khoản mới đăng ký luôn được gán vai trò `customer` và bị đăng xuất sau khi đăng ký; người dùng phải đăng nhập lại.
 
@@ -25,7 +25,7 @@ Tài khoản mới đăng ký luôn được gán vai trò `customer` và bị �
 
 ## 3. Bảo vệ theo chủ sở hữu
 
-Mỗi `ImageDocument` lưu `user_id` là chủ hồ sơ. Policy không tin vào ID từ trình duyệt mà kiểm tra lại trên server.
+Trong luồng upload hiện tại, mỗi `ImageDocument` mới luôn được gán `user_id` là chủ hồ sơ. Policy không tin vào ID từ trình duyệt mà kiểm tra lại trên server. Cột `user_id` vẫn cho phép `NULL` ở database để tương thích dữ liệu cũ; hồ sơ không có chủ không thể được Customer thao tác qua Policy.
 
 | Hành động | Customer | Processor/Reviewer | Admin |
 | --- | --- | --- | --- |
@@ -52,15 +52,17 @@ processing
   │                              └──> resubmission_required
   └─ failed
 
-resubmission_required ──> processing (khách hàng upload lại)
+resubmission_required ──> pending_review (khách sửa OCR nếu cần rồi gửi lại cùng hồ sơ)
+
+upload ảnh mới ──> tạo ImageDocument mới ở processing
 ```
 
 - AI Engine tạo `completed` hoặc `failed`.
 - Customer nhấn “Gửi hồ sơ cho nhân viên xác thực” để chuyển `completed` thành `pending_review`.
 - Processor/Reviewer nhấn nút riêng “Xác thực hồ sơ” hoặc “Yêu cầu gửi lại”; yêu cầu gửi lại bắt buộc có lý do và được lưu ở `review_notes`.
-- Customer xem trạng thái và lý do trên hồ sơ của mình, chỉnh dữ liệu chuẩn hóa rồi gửi lại.
+- Customer xem trạng thái và lý do trên hồ sơ của mình, chỉnh dữ liệu chuẩn hóa rồi gửi lại. Upload ảnh mới luôn tạo hồ sơ mới; hồ sơ cũ không tự chuyển từ `resubmission_required` về `processing`.
 
-## 5. Quyền được seed
+## 5. Permission được seed và điểm kiểm tra quyền
 
 Các permission được tạo trong `RolesAndPermissionsSeeder`, gồm nhóm hồ sơ (`documents.*`), tài khoản (`users.*`), vai trò (`roles.*`), quản lý quyền và `audit.view`. Route thực tế hiện dùng:
 
@@ -69,10 +71,12 @@ Các permission được tạo trong `RolesAndPermissionsSeeder`, gồm nhóm h�
 - `documents.ocr.update`, `documents.submit-review`, `documents.verify`, `documents.request-resubmission`.
 - `admin.users`, `admin.users.access`, `admin.audit-logs`.
 
-Các permission chưa có route tương ứng không tự tạo thêm khả năng trên UI; muốn mở rộng phải bổ sung đồng thời route, Policy, controller, giao diện và test.
+Tên trong danh sách trên là **route name**, không phải toàn bộ tên permission. Policy thực tế dùng các permission như `documents.upload`, `documents.view-own`, `documents.view-any`, `documents.edit-structured-ocr-own`, `documents.submit-review`, `documents.verify` và `documents.view-face-crop` kết hợp với owner/status/role. Cả thao tác xác thực và yêu cầu gửi lại hiện đi qua `review()`; policy này kiểm tra `documents.verify`, role `processor`/`reviewer` và trạng thái `pending_review`, chưa kiểm tra riêng `documents.request-resubmission`. Các route Admin dùng middleware `role:admin`.
+
+Seeder cũng tạo một số permission dự phòng như `documents.view-raw-ocr`, `documents.edit-structured-ocr-any`, `documents.retry-processing`, `documents.archive`, `documents.delete`, `users.create` và `permissions.manage`, nhưng hiện chưa có controller/route/UI cho các thao tác đó. Chúng không tự cấp thêm chức năng. Hai JSON kỹ thuật cũng không có endpoint riêng: chúng chỉ được render trong trang chi tiết khi người xem có role `admin`.
 
 ## 6. Admin và audit log
 
-Admin có thể mở trang quản lý tài khoản để gán một role trong danh sách seed và bật/tắt `is_active`. Không thể tự khóa chính tài khoản Admin đang đăng nhập. Các lần upload, xử lý, xem ảnh, xem face crop, sửa OCR, gửi xác thực, xác thực, yêu cầu gửi lại và thay đổi quyền được ghi vào bảng `audit_logs`.
+Admin có thể mở trang quản lý tài khoản để gán một role trong danh sách seed và bật/tắt `is_active`. Không thể tự khóa chính tài khoản Admin đang đăng nhập. Policy cho phép Admin mở bất kỳ hồ sơ nào theo ID, nhưng trang danh sách trang chủ chỉ hiển thị tối đa 6 hồ sơ ở các trạng thái `completed`, `pending_review`, `resubmission_required` và `verified`; không liệt kê `processing` hoặc `failed`. Các lần upload, xử lý, xem ảnh, xem face crop, sửa OCR, gửi xác thực, xác thực, yêu cầu gửi lại và thay đổi quyền được ghi vào bảng `audit_logs`.
 
 Ảnh và JSON được lưu trong private storage/MySQL, không phát public trực tiếp. Route ảnh luôn kiểm tra Policy trước khi trả file và đặt `Cache-Control: private, no-store`.
