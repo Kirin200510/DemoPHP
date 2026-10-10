@@ -12,7 +12,7 @@ class StoreDocumentRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return true;
+        return $this->user()?->can('documents.upload') ?? false;
     }
 
     /**

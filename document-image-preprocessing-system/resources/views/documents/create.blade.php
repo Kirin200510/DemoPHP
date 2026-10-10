@@ -23,13 +23,8 @@
             </div>
         </div>
 
+        @can('documents.upload')
         <div class="rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-cyan-950/30 backdrop-blur sm:p-7">
-            @if ($errors->any())
-                <div class="mb-5 rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-sm text-red-200" role="alert">
-                    {{ $errors->first() }}
-                </div>
-            @endif
-
             <form id="document-upload-form" action="{{ route('documents.store') }}" method="POST" enctype="multipart/form-data" class="flex flex-col gap-5">
                 @csrf
 
@@ -57,23 +52,68 @@
                 <p class="text-center text-xs text-slate-500">Quá trình xử lý ảnh và OCR có thể mất khoảng một phút.</p>
             </form>
         </div>
+        @else
+            <div class="rounded-3xl border border-white/10 bg-white/[0.06] p-7 shadow-2xl shadow-cyan-950/30 backdrop-blur">
+                @role('admin')
+                    <span class="inline-flex rounded-full bg-blue-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-200">Chế độ chỉ xem</span>
+                    <h2 class="mt-4 text-xl font-semibold text-white">Tra cứu hồ sơ</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-400">Admin chỉ được xem thông tin hồ sơ và quản lý tài khoản, không upload hoặc xử lý giấy tờ.</p>
+                @else
+                    <span class="inline-flex rounded-full bg-amber-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-200">Nhân viên xử lý</span>
+                    <h2 class="mt-4 text-xl font-semibold text-white">Hàng đợi hồ sơ cần xác thực</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-400">Chỉ hồ sơ khách hàng đã gửi chờ xác thực mới xuất hiện tại đây.</p>
+                @endrole
+            </div>
+        @endcan
     </section>
 
     @if ($recentDocuments->isNotEmpty())
         <section class="mt-16 flex flex-col gap-5">
             <div>
-                <h2 class="text-xl font-semibold text-white">Kết quả gần đây</h2>
-                <p class="mt-1 text-sm text-slate-400">Các ảnh đã xử lý thành công được lưu trong hệ thống.</p>
+                <h2 class="text-xl font-semibold text-white">@role('admin') Hồ sơ gần đây @else @role('processor|reviewer') Hàng đợi hồ sơ cần xác thực @else Hồ sơ của tôi @endrole @endrole</h2>
+                <p class="mt-1 text-sm text-slate-400">@role('admin') Chọn hồ sơ để xem thông tin, admin không thực hiện thao tác xử lý. @else @role('processor|reviewer') Mở hồ sơ để xác thực hoặc yêu cầu khách hàng gửi lại kèm lý do. @else Theo dõi tiến trình xử lý, xác thực và xem lại hồ sơ của bạn tại đây. @endrole @endrole</p>
             </div>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 @foreach ($recentDocuments as $recentDocument)
-                    <a href="{{ route('documents.show', $recentDocument) }}" class="group overflow-hidden rounded-2xl border border-white/10 bg-white/5 transition hover:-translate-y-1 hover:border-cyan-400/40">
-                        <img src="{{ route('documents.processed', $recentDocument) }}" alt="Kết quả xử lý #{{ $recentDocument->id }}" class="aspect-[4/3] w-full bg-slate-900 object-contain">
+                    <div class="overflow-hidden rounded-2xl border border-white/10 bg-white/5 transition hover:-translate-y-1 hover:border-cyan-400/40">
+                        <a href="{{ route('documents.show', $recentDocument) }}" class="group block">
+                        @if ($recentDocument->processed_path)
+                            <img src="{{ route('documents.processed', $recentDocument) }}" alt="Kết quả xử lý #{{ $recentDocument->id }}" class="aspect-[4/3] w-full bg-slate-900 object-contain">
+                        @else
+                            <div class="grid aspect-[4/3] place-items-center bg-slate-900 px-5 text-center text-sm text-slate-500">Hệ thống đang xử lý hồ sơ</div>
+                        @endif
                         <div class="flex items-center justify-between px-4 py-3 text-sm">
                             <span class="text-slate-300">Ảnh #{{ $recentDocument->id }}</span>
-                            <span class="text-cyan-300 transition group-hover:translate-x-1">Xem →</span>
+                            <span class="text-cyan-300 transition group-hover:translate-x-1">Chi tiết →</span>
                         </div>
-                    </a>
+                        </a>
+                        @php
+                            $statusLabel = match ($recentDocument->status) {
+                                \App\Models\ImageDocument::STATUS_PROCESSING => 'Đang xử lý',
+                                \App\Models\ImageDocument::STATUS_COMPLETED => 'Đã xử lý - chờ gửi xác thực',
+                                \App\Models\ImageDocument::STATUS_PENDING_REVIEW => 'Đang chờ xác thực',
+                                \App\Models\ImageDocument::STATUS_VERIFIED => 'Đã xác thực',
+                                \App\Models\ImageDocument::STATUS_RESUBMISSION_REQUIRED => 'Cần gửi lại hồ sơ',
+                                \App\Models\ImageDocument::STATUS_FAILED => 'Xử lý thất bại',
+                                default => 'Đang cập nhật',
+                            };
+                            $statusClass = match ($recentDocument->status) {
+                                \App\Models\ImageDocument::STATUS_VERIFIED => 'bg-emerald-400/10 text-emerald-300',
+                                \App\Models\ImageDocument::STATUS_PENDING_REVIEW => 'bg-amber-400/10 text-amber-300',
+                                \App\Models\ImageDocument::STATUS_RESUBMISSION_REQUIRED => 'bg-orange-400/10 text-orange-300',
+                                \App\Models\ImageDocument::STATUS_FAILED => 'bg-red-400/10 text-red-300',
+                                default => 'bg-cyan-400/10 text-cyan-300',
+                            };
+                        @endphp
+                        <div class="border-t border-white/10 px-4 py-3">
+                            <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $statusClass }}">{{ $statusLabel }}</span>
+                        </div>
+                        @can('review', $recentDocument)
+                            <div class="border-t border-amber-400/20 bg-amber-400/[0.06] px-4 py-3">
+                                <a href="{{ route('documents.show', $recentDocument) }}#review-actions" class="inline-flex w-full items-center justify-center rounded-lg bg-amber-400 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-amber-300">Xác thực hồ sơ</a>
+                            </div>
+                        @endcan
+                    </div>
                 @endforeach
             </div>
         </section>

@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\ImageDocument;
+use App\Models\User;
+use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
@@ -13,6 +15,16 @@ use Tests\TestCase;
 class DocumentProcessingTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->seed(RolesAndPermissionsSeeder::class);
+        $user = User::factory()->create();
+        $user->assignRole('customer');
+        $this->actingAs($user);
+    }
 
     public function test_upload_page_displays_the_processing_form(): void
     {
@@ -72,14 +84,13 @@ class DocumentProcessingTest extends TestCase
         $this->get(route('documents.show', $document))
             ->assertOk()
             ->assertSee('Dữ liệu OCR đã chuẩn hóa')
-            ->assertSee('Khuôn mặt được trích xuất')
+            ->assertDontSee('Khuôn mặt được trích xuất')
             ->assertSee('Toàn bộ nội dung OCR đọc được')
             ->assertSee('Số/No')
             ->assertSee('Nguyễn Văn A');
 
         $this->get(route('documents.face-crop', $document))
-            ->assertOk()
-            ->assertContent('face-crop-jpeg-content');
+            ->assertForbidden();
     }
 
     public function test_ai_engine_failure_marks_document_as_failed_without_processed_image(): void
@@ -166,6 +177,7 @@ class DocumentProcessingTest extends TestCase
                 'structured' => [
                     'status' => 'completed',
                     'document' => [
+                        'document_type' => 'citizen_identity_card',
                         'normalized_value' => 'Căn cước công dân / Citizen Identity Card',
                     ],
                     'fields' => [

@@ -1,179 +1,155 @@
-# Hướng dẫn chạy hệ thống
+# Hướng dẫn chạy project
 
-Tài liệu này hướng dẫn chạy đầy đủ giao diện Laravel, MySQL và AI engine xử lý ảnh/OCR trên máy local.
+Project gồm Laravel UI/API, MySQL và FastAPI AI Engine. Laravel chạy cổng `8001`, AI Engine chạy cổng `8000`.
 
-## 1. Điều kiện cần có
+## 1. Yêu cầu
 
-- PHP 8.3 và Composer.
-- MySQL đang cài trên máy.
-- Node.js và npm (chỉ cần để build hoặc chạy Vite khi thay đổi giao diện).
-- Python 3.12. Nên dùng bản này vì virtual environment hiện tại của AI engine dùng Python 3.12.
-
-Toàn bộ lệnh dưới đây được chạy từ thư mục gốc project:
+- PHP 8.3, Composer và MySQL.
+- Node.js/npm để build Vite.
+- Python 3.12 cho AI Engine.
+- Có thể dùng `systemctl`, XAMPP hoặc Docker để chạy MySQL.
 
 ```bash
 cd /home/user/document-image-preprocessing-system
-```
-
-## 2. Cài đặt Laravel và cấu hình database
-
-Nếu mới lấy source về, cài package PHP và JavaScript:
-
-```bash
 composer install
 npm install
+cp .env.example .env       # chỉ chạy nếu chưa có .env
+php artisan key:generate   # chỉ chạy nếu APP_KEY còn trống
 ```
 
-Tạo file cấu hình nếu chưa có:
+## 2. Cấu hình `.env`
 
-```bash
-cp .env.example .env
-php artisan key:generate
-```
-
-Mở `.env` và cấu hình MySQL phù hợp với máy local. Ví dụ:
+Tạo database `document_image_preprocessing` rồi cấu hình tối thiểu:
 
 ```env
 APP_URL=http://127.0.0.1:8001
-
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE=document_image_preprocessing
 DB_USERNAME=root
 DB_PASSWORD=
-
 AI_ENGINE_URL=http://127.0.0.1:8000
 AI_ENGINE_CONNECT_TIMEOUT=5
 AI_ENGINE_TIMEOUT=360
 ```
 
-Tạo database `document_image_preprocessing` trong MySQL nếu chưa có. Sau đó khởi động MySQL và chạy migration:
+Sau đó chạy MySQL và migrate/seed:
 
 ```bash
 sudo systemctl start mysql
 php artisan config:clear
-php artisan migrate --no-interaction
+php artisan migrate --seed --no-interaction
 ```
 
-Kiểm tra trạng thái migration:
+`DatabaseSeeder` tạo role và tài khoản demo:
 
-```bash
-php artisan migrate:status
-```
+| Role | Email | Mật khẩu |
+| --- | --- | --- |
+| Admin | `admin@example.com` | `Admin@12345` |
+| Processor | `processor@example.com` | `Processor@12345` |
+| Customer | `test@example.com` | `password` |
 
-> Nếu máy không dùng `systemctl`, hãy khởi động MySQL theo cách tương ứng với XAMPP, Docker hoặc công cụ quản lý MySQL đang dùng.
+Chỉ dùng các tài khoản này ở môi trường local; đổi mật khẩu trước khi triển khai thật. Tài khoản đăng ký mới được gán `customer` và phải đăng nhập lại sau khi đăng ký.
 
-## 3. Cài và chạy AI engine
+## 3. Chạy AI Engine
 
-Mở một terminal riêng:
+Mở terminal thứ nhất:
 
 ```bash
 cd /home/user/document-image-preprocessing-system/ai-engine
-```
-
-Nếu thư mục `venv` đã có, kích hoạt nó:
-
-```bash
-source venv/bin/activate
-```
-
-Nếu chưa có virtual environment, tạo mới và cài các package đã chốt trong `requirements.txt`:
-
-```bash
-python3.12 -m venv venv
+python3.12 -m venv venv       # chỉ cần chạy lần đầu nếu chưa có venv
 source venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-```
-
-Chạy FastAPI server:
-
-```bash
 uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Kiểm tra AI engine từ một terminal khác:
+Kiểm tra ở terminal khác:
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Kết quả mong đợi có `"status":"ok"`. Khi xử lý lần đầu, PaddleOCR/VietOCR có thể tải model vào cache nên sẽ lâu hơn các lần sau.
+Kết quả đúng có `"status":"ok"`. Lần đầu OCR có thể chậm vì model được tải vào cache.
 
-## 4. Build giao diện và chạy Laravel
+## 4. Build và chạy Laravel
 
-Mở terminal thứ hai tại thư mục gốc project.
-
-Nếu chỉ cần chạy giao diện hiện tại, build asset một lần:
+Mở terminal thứ hai:
 
 ```bash
 cd /home/user/document-image-preprocessing-system
 npm run build
-```
-
-Sau đó khởi động Laravel:
-
-```bash
 php artisan serve --host=127.0.0.1 --port=8001
 ```
 
-Mở giao diện tại:
-
-```text
-http://127.0.0.1:8001
-```
-
-Khi đang chỉnh sửa CSS/JavaScript/Blade và muốn asset tự cập nhật, chạy `npm run dev` ở terminal thứ ba thay cho việc build lại sau mỗi lần sửa:
+Mở `http://127.0.0.1:8001`. Khi đang sửa CSS/JS, có thể dùng terminal thứ ba:
 
 ```bash
 npm run dev
 ```
 
-## 5. Thứ tự chạy hằng ngày
+Nếu đã chạy Vite dev thì không cần build lại sau mỗi lần sửa frontend.
 
-Mỗi lần phát triển, mở ít nhất hai terminal:
+## 5. SMTP và đặt lại mật khẩu
 
-**Terminal 1 — AI engine**
+Gmail cần bật xác minh hai bước và tạo App Password 16 ký tự. Không dùng mật khẩu Gmail thông thường và không commit `.env`.
 
-```bash
-cd /home/user/document-image-preprocessing-system/ai-engine
-source venv/bin/activate
-uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```env
+MAIL_MAILER=smtp
+MAIL_SCHEME=smtp
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-16-character-app-password
+MAIL_FROM_ADDRESS=your-email@gmail.com
+MAIL_FROM_NAME="Document Image Preprocessing System"
 ```
 
-**Terminal 2 — Laravel**
+Sau khi sửa `.env`:
 
 ```bash
-cd /home/user/document-image-preprocessing-system
-php artisan serve --host=127.0.0.1 --port=8001
+php artisan config:clear
 ```
 
-Tùy chọn khi đang sửa giao diện, dùng **Terminal 3 — Vite**:
+Yêu cầu reset mật khẩu một lần, sử dụng link mới nhất và email đúng với tài khoản. Token hết hạn sau 60 phút; yêu cầu mới bị giới hạn 60 giây.
 
-```bash
-cd /home/user/document-image-preprocessing-system
-npm run dev
-```
+## 6. Luồng sử dụng UI
 
-MySQL phải đang chạy trước khi upload ảnh. Luồng thao tác trên UI là: chọn ảnh → nhấn **Xử lý hình ảnh và OCR** → Laravel gọi `POST /process` của AI engine → AI engine tiền xử lý, OCR và chuẩn hóa → Laravel lưu ảnh kết quả cùng JSON OCR vào MySQL → trang kết quả hiển thị toàn bộ dòng OCR và các trường chuẩn hóa.
+1. Đăng nhập (hoặc đăng ký rồi đăng nhập lại).
+2. Customer chọn ảnh và nhấn **Xử lý hình ảnh và OCR**.
+3. Laravel gửi ảnh tới `POST /process` của AI Engine.
+4. AI Engine trả ảnh cuối, OCR thô, OCR chuẩn hóa và face crop nếu phát hiện được.
+5. Laravel lưu kết quả vào private storage/MySQL.
+6. Customer kiểm tra/chỉnh trường OCR chuẩn hóa rồi gửi hồ sơ.
+7. Processor mở hàng đợi `pending_review`, chọn **Xác thực hồ sơ** hoặc **Yêu cầu gửi lại** kèm lý do.
+8. Admin chỉ tra cứu dữ liệu, quản lý tài khoản/vai trò và audit log; không xử lý giấy tờ trên UI.
 
-## 6. Kiểm tra khi xảy ra lỗi
-
-| Hiện tượng | Cách kiểm tra/khắc phục |
-| --- | --- |
-| UI báo không thể xử lý ảnh | Kiểm tra terminal AI engine còn chạy; mở `http://127.0.0.1:8000/health`; bảo đảm `.env` có `AI_ENGINE_URL=http://127.0.0.1:8000`; sau khi sửa `.env`, chạy `php artisan config:clear`. |
-| Lỗi 404 `/process` | Dừng process Uvicorn cũ và chạy lại lệnh ở mục 3 để nạp `app.py` mới. |
-| Lỗi kết nối MySQL | Khởi động MySQL, kiểm tra `DB_*` trong `.env`, rồi chạy `php artisan migrate --no-interaction`. |
-| Lỗi thiếu cột OCR | Chạy migration ở mục 2. |
-| Lỗi thiếu Vite manifest | Chạy `npm run build` hoặc để `npm run dev` hoạt động. |
-| OCR lâu ở lần đầu | Chờ model được tải vào cache; các lần sau thường nhanh hơn. |
-
-## 7. Dữ liệu được lưu ở đâu
+## 7. Vị trí dữ liệu
 
 - Ảnh gốc: `storage/app/private/documents/originals/`.
-- Ảnh đã xử lý: `storage/app/private/documents/processed/`.
-- Bản ghi ảnh và JSON OCR: bảng MySQL `image_documents`, hai cột `ocr_raw_data` và `ocr_structured_data`.
-- Output kỹ thuật mới nhất của AI engine: `ai-engine/output/`. Các file tại đây bị ghi đè ở mỗi lần chạy, không phải lịch sử theo từng người dùng.
+- Ảnh xử lý: `storage/app/private/documents/processed/`.
+- Face crop: `storage/app/private/documents/faces/`.
+- JSON OCR: cột `ocr_raw_data`, `ocr_structured_data` trong bảng `image_documents`.
+- Output debug AI Engine: `ai-engine/output/` (dùng chung và có thể bị ghi đè mỗi lượt chạy).
 
-Vì ảnh giấy tờ và OCR có thể chứa dữ liệu cá nhân, không đưa các file trong `storage/`, `ai-engine/output/` hay `.env` lên repository công khai.
+## 8. Kiểm tra và xử lý lỗi
+
+```bash
+php artisan route:list --except-vendor
+php artisan view:cache
+npm run build
+php artisan test --compact
+```
+
+Test Feature mặc định dùng SQLite in-memory. Máy chạy test phải có extension `pdo_sqlite`; nếu chỉ có `pdo_mysql`, test database sẽ báo `could not find driver`. Đây là thiếu extension môi trường, không phải lỗi của Policy/controller.
+
+| Lỗi | Cách xử lý |
+| --- | --- |
+| UI báo AI engine không xử lý được | Kiểm tra Uvicorn, `/health`, `AI_ENGINE_URL` và log Laravel |
+| Lỗi 404 `/process` | Khởi động lại Uvicorn từ thư mục `ai-engine` |
+| Lỗi MySQL | Khởi động MySQL và kiểm tra các biến `DB_*` |
+| Thiếu Vite manifest | Chạy `npm run build` hoặc `npm run dev` |
+| Token reset không hợp lệ | Dùng link mới nhất, đúng email, đúng `APP_URL`, không dùng link đã dùng/hết hạn |
+
+Không đưa `.env`, ảnh giấy tờ, private storage hoặc `ai-engine/output/` lên repository công khai.

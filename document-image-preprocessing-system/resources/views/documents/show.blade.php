@@ -5,24 +5,25 @@
 @section('content')
     <div class="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div class="flex flex-col gap-2">
-            <a href="{{ route('documents.create') }}" class="text-sm text-cyan-300 transition hover:text-cyan-200">← Xử lý ảnh khác</a>
+            <a href="{{ route('documents.create') }}" class="text-sm text-cyan-300 transition hover:text-cyan-200">← @role('admin') Tra cứu hồ sơ @else Xử lý ảnh khác @endrole</a>
             <h1 class="text-3xl font-bold tracking-tight text-white">Kết quả xử lý #{{ $document->id }}</h1>
             <p class="text-sm text-slate-400">Tạo lúc {{ $document->created_at->format('H:i · d/m/Y') }}</p>
         </div>
-        <span class="w-fit rounded-full px-3 py-1 text-xs font-semibold {{ $document->status === \App\Models\ImageDocument::STATUS_COMPLETED ? 'bg-emerald-400/10 text-emerald-300' : 'bg-red-400/10 text-red-300' }}">
-            {{ $document->status === \App\Models\ImageDocument::STATUS_COMPLETED ? 'Đã xử lý' : 'Xử lý thất bại' }}
+        <span class="w-fit rounded-full px-3 py-1 text-xs font-semibold {{ in_array($document->status, [\App\Models\ImageDocument::STATUS_COMPLETED, \App\Models\ImageDocument::STATUS_VERIFIED], true) ? 'bg-emerald-400/10 text-emerald-300' : ($document->status === \App\Models\ImageDocument::STATUS_PENDING_REVIEW ? 'bg-amber-400/10 text-amber-300' : 'bg-red-400/10 text-red-300') }}">
+            {{ match ($document->status) {
+                \App\Models\ImageDocument::STATUS_COMPLETED => 'Đã xử lý',
+                \App\Models\ImageDocument::STATUS_PENDING_REVIEW => 'Chờ xác thực',
+                \App\Models\ImageDocument::STATUS_VERIFIED => 'Đã xác thực',
+                \App\Models\ImageDocument::STATUS_RESUBMISSION_REQUIRED => 'Yêu cầu gửi lại',
+                default => 'Xử lý thất bại',
+            } }}
         </span>
     </div>
 
-    @if (session('success'))
-        <div class="mb-6 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200" role="status">
-            {{ session('success') }}
-        </div>
-    @endif
-
-    @if ($errors->has('processing'))
-        <div class="mb-6 rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-sm text-red-200" role="alert">
-            {{ $errors->first('processing') }}
+    @if ($document->status === \App\Models\ImageDocument::STATUS_RESUBMISSION_REQUIRED && $document->review_notes)
+        <div class="mb-6 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100" role="alert">
+            <p class="font-semibold">Lý do yêu cầu gửi lại hồ sơ</p>
+            <p class="mt-1 whitespace-pre-line text-amber-100/85">{{ $document->review_notes }}</p>
         </div>
     @endif
 
@@ -62,6 +63,7 @@
             && is_string(data_get($faceCropData, 'stored_path'));
     @endphp
 
+    @can('viewFaceCrop', $document)
     @if ($hasStoredFaceCrop)
         <section class="mt-7 overflow-hidden rounded-2xl border border-violet-400/25 bg-violet-400/[0.04]">
             <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -76,6 +78,7 @@
             </div>
         </section>
     @endif
+    @endcan
 
     @if ($document->ocr_structured_data)
         @php
@@ -185,9 +188,66 @@
                             </div>
                         @endforeach
                     </dl>
+
+                    @can('updateStructuredOcr', $document)
+                        <form method="POST" action="{{ route('documents.ocr.update', $document) }}" class="mt-5 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4">
+                            @csrf
+                            @method('PUT')
+                            <h3 class="text-sm font-semibold text-white">Cập nhật dữ liệu chuẩn hóa</h3>
+                            <p class="mt-1 text-xs text-slate-400">Chỉ thay đổi giá trị chuẩn hóa; dữ liệu OCR thô vẫn được bảo toàn.</p>
+                            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                                @foreach ($displayFields as $fieldName => $fieldLabel)
+                                    @php($editableFieldData = data_get($structuredFields, $fieldName, []))
+                                    <label class="flex flex-col gap-1 text-xs text-slate-400">
+                                        {{ $fieldLabel }}
+                                        <input name="fields[{{ $fieldName }}]" value="{{ data_get($editableFieldData, 'normalized_value', data_get($editableFieldData, 'raw_value', '')) }}" class="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-400 focus:ring-2">
+                                    </label>
+                                @endforeach
+                            </div>
+                            <button type="submit" class="mt-4 h-10 rounded-lg bg-cyan-400 px-4 text-sm font-semibold text-slate-950 hover:bg-cyan-300">Lưu dữ liệu chuẩn hóa</button>
+                        </form>
+                    @endcan
+
+                    @can('submitForReview', $document)
+                        <form method="POST" action="{{ route('documents.submit-review', $document) }}" class="mt-3">
+                            @csrf
+                            <button type="submit" class="h-10 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/20">Gửi hồ sơ cho nhân viên xác thực</button>
+                        </form>
+                    @endcan
+
                 @else
                     <p class="text-sm text-slate-400">Chưa xác định được loại giấy tờ để áp dụng bộ trường cố định.</p>
                 @endif
+
+                @can('review', $document)
+                    @if ($document->status === \App\Models\ImageDocument::STATUS_PENDING_REVIEW)
+                        <div id="review-actions" class="mt-6 scroll-mt-6 space-y-4">
+                            <section class="rounded-2xl border border-emerald-400/30 bg-emerald-400/[0.06] p-5">
+                                <span class="text-xs font-semibold uppercase tracking-wider text-emerald-300">Tác vụ xác thực</span>
+                                <h3 class="mt-1 text-lg font-semibold text-white">Thông tin chính xác?</h3>
+                                <p class="mt-1 text-sm text-slate-300">Đối chiếu ảnh và dữ liệu OCR, sau đó xác nhận hồ sơ.</p>
+                                <form method="POST" action="{{ route('documents.verify', $document) }}" class="mt-4">
+                                    @csrf
+                                    <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-500">✓ Xác thực hồ sơ</button>
+                                </form>
+                            </section>
+
+                            <section class="rounded-2xl border border-amber-400/30 bg-amber-400/[0.06] p-5">
+                                <span class="text-xs font-semibold uppercase tracking-wider text-amber-300">Tác vụ gửi lại</span>
+                                <h3 class="mt-1 text-lg font-semibold text-white">Thông tin chưa chính xác?</h3>
+                                <p class="mt-1 text-sm text-slate-300">Nhập lý do cụ thể để khách hàng bổ sung hoặc chụp lại hồ sơ.</p>
+                                <form method="POST" action="{{ route('documents.request-resubmission', $document) }}" class="mt-4">
+                                    @csrf
+                                    <label for="resubmission-reason" class="sr-only">Lý do yêu cầu gửi lại</label>
+                                    <div class="flex flex-col gap-2 sm:flex-row">
+                                        <input id="resubmission-reason" name="reason" required maxlength="2000" placeholder="Ví dụ: Ảnh mờ, thông tin chưa khớp..." class="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none ring-amber-400 focus:ring-2">
+                                        <button type="submit" class="inline-flex h-10 items-center justify-center rounded-lg bg-amber-600 px-4 text-sm font-bold text-white transition hover:bg-amber-500">Yêu cầu gửi lại</button>
+                                    </div>
+                                </form>
+                            </section>
+                        </div>
+                    @endif
+                @endcan
 
                 @if ($additionalStructuredFields || $verificationLines || $unmappedRawLines)
                     <div class="mt-5 border-t border-white/10 pt-5">
@@ -254,29 +314,32 @@
             </section>
         @endif
 
-        <section class="mt-7 grid gap-4 lg:grid-cols-2">
-            <details class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-                <summary class="cursor-pointer px-5 py-4 font-semibold text-white">Xem JSON chuẩn hóa</summary>
-                <pre class="max-h-[32rem] overflow-auto border-t border-white/10 bg-slate-950 p-5 text-xs leading-6 text-emerald-200">{{ json_encode($document->ocr_structured_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
-            </details>
-
-            @if ($document->ocr_raw_data)
+        @role('admin')
+            <section class="mt-7 grid gap-4 lg:grid-cols-2">
                 <details class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-                    <summary class="cursor-pointer px-5 py-4 font-semibold text-white">Xem JSON OCR thô</summary>
-                    <pre class="max-h-[32rem] overflow-auto border-t border-white/10 bg-slate-950 p-5 text-xs leading-6 text-cyan-200">{{ json_encode($document->ocr_raw_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+                    <summary class="cursor-pointer px-5 py-4 font-semibold text-white">Xem JSON chuẩn hóa</summary>
+                    <pre class="max-h-[32rem] overflow-auto border-t border-white/10 bg-slate-950 p-5 text-xs leading-6 text-emerald-200">{{ json_encode($document->ocr_structured_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
                 </details>
-            @endif
-        </section>
+
+                @if ($document->ocr_raw_data)
+                    <details class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                        <summary class="cursor-pointer px-5 py-4 font-semibold text-white">Xem JSON OCR thô</summary>
+                        <pre class="max-h-[32rem] overflow-auto border-t border-white/10 bg-slate-950 p-5 text-xs leading-6 text-cyan-200">{{ json_encode($document->ocr_raw_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+                    </details>
+                @endif
+            </section>
+        @endrole
     @endif
 
     <div class="mt-7 flex flex-wrap gap-3">
-        @if ($document->processed_path)
-            <a href="{{ route('documents.processed', $document) }}" download="document-{{ $document->id }}-processed.jpg" class="inline-flex h-11 items-center justify-center rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">
-                Tải ảnh kết quả
+        @role('admin')
+            <a href="{{ route('documents.create') }}" class="inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10">
+                Về tra cứu hồ sơ
             </a>
-        @endif
-        <a href="{{ route('documents.create') }}" class="inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10">
-            Chọn ảnh mới
-        </a>
+        @else
+            <a href="{{ route('documents.create') }}" class="inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10">
+                Chọn ảnh mới
+            </a>
+        @endrole
     </div>
 @endsection

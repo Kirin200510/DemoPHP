@@ -67,3 +67,24 @@ if (uploadInput && uploadForm) {
 
     updateProcessButton();
 }
+
+document.querySelectorAll('[data-password-toggle]').forEach((toggle) => {
+    const input = document.getElementById(toggle.dataset.passwordToggle);
+
+    if (!input) {
+        return;
+    }
+
+    toggle.addEventListener('click', () => {
+        const shouldShowPassword = input.type === 'password';
+        const eye = toggle.querySelector('[data-password-eye]');
+        const eyeOff = toggle.querySelector('[data-password-eye-off]');
+
+        input.type = shouldShowPassword ? 'text' : 'password';
+        eye?.classList.toggle('hidden', shouldShowPassword);
+        eyeOff?.classList.toggle('hidden', !shouldShowPassword);
+        toggle.setAttribute('aria-label', shouldShowPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu');
+        toggle.setAttribute('title', shouldShowPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu');
+        toggle.setAttribute('aria-pressed', shouldShowPassword ? 'true' : 'false');
+    });
+});
