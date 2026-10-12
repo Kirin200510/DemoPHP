@@ -116,6 +116,8 @@ Yêu cầu reset mật khẩu một lần, sử dụng link mới nhất và ema
 
 ## 6. Luồng sử dụng UI
 
+Trước khi upload, ảnh giấy tờ phải là JPG/JPEG/PNG/WEBP và dung lượng **không vượt quá 10 MB**. Ảnh đầu vào không bị ràng buộc kích thước pixel hoặc dung lượng tối thiểu. Sau crop/tiền xử lý, bước resize/enhance chuẩn hóa `document_final.jpg`: mỗi chiều trong **350–4096 px** và file JPEG trong **98 KB–3 MB**. Ảnh rộng hơn 1600 px được thu nhỏ theo tỷ lệ; ảnh quá nhỏ được phóng to hoặc thêm viền trắng khi cần để đạt kích thước tối thiểu.
+
 1. Đăng nhập (hoặc đăng ký rồi đăng nhập lại).
 2. Customer chọn ảnh và nhấn **Xử lý hình ảnh và OCR**.
 3. Laravel gửi ảnh tới `POST /process` của AI Engine.

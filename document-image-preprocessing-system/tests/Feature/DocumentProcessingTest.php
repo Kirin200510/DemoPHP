@@ -33,6 +33,7 @@ class DocumentProcessingTest extends TestCase
         $response
             ->assertOk()
             ->assertSee('Xử lý hình ảnh')
+            ->assertSee('JPG, JPEG, PNG, WEBP · tối đa 10 MB')
             ->assertSee('name="image"', false)
             ->assertSee('type="submit" disabled', false);
     }
@@ -139,7 +140,67 @@ class DocumentProcessingTest extends TestCase
         Http::assertNothingSent();
     }
 
-    private function fakePng(string $name): UploadedFile
+    public function test_image_smaller_than_98_kb_is_sent_to_the_ai_engine(): void
+    {
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        config(['services.ai_engine.url' => 'http://ai-engine.test']);
+        Http::fake([
+            'http://ai-engine.test/process' => Http::response($this->successfulAiResponse()),
+        ]);
+
+        $response = $this->post(route('documents.store'), [
+            'image' => $this->fakePng('small.png', 97),
+        ]);
+        $document = ImageDocument::query()->sole();
+
+        $response
+            ->assertRedirect(route('documents.show', $document))
+            ->assertSessionDoesntHaveErrors();
+        $this->assertSame(ImageDocument::STATUS_COMPLETED, $document->status);
+        Http::assertSentCount(1);
+    }
+
+    public function test_image_larger_than_10_mb_is_rejected_without_calling_ai_engine(): void
+    {
+        Storage::fake('local');
+        Http::preventStrayRequests();
+
+        $response = $this->from(route('documents.create'))->post(route('documents.store'), [
+            'image' => $this->fakePng('large.png', 10241),
+        ]);
+
+        $response
+            ->assertRedirect(route('documents.create'))
+            ->assertSessionHasErrors([
+                'image' => 'Dung lượng hình ảnh không được vượt quá 10 MB.',
+            ]);
+        $this->assertDatabaseCount('image_documents', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_image_outside_output_pixel_dimensions_is_sent_to_the_ai_engine(): void
+    {
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        config(['services.ai_engine.url' => 'http://ai-engine.test']);
+        Http::fake([
+            'http://ai-engine.test/process' => Http::response($this->successfulAiResponse()),
+        ]);
+
+        $response = $this->post(route('documents.store'), [
+            'image' => $this->fakePng('small-dimensions.png'),
+        ]);
+        $document = ImageDocument::query()->sole();
+
+        $response
+            ->assertRedirect(route('documents.show', $document))
+            ->assertSessionDoesntHaveErrors();
+        $this->assertSame(ImageDocument::STATUS_COMPLETED, $document->status);
+        Http::assertSentCount(1);
+    }
+
+    private function fakePng(string $name, int $reportedSizeInKilobytes = 100): UploadedFile
     {
         return UploadedFile::fake()->createWithContent(
             $name,
@@ -147,7 +208,7 @@ class DocumentProcessingTest extends TestCase
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
                 true,
             ),
-        );
+        )->size($reportedSizeInKilobytes);
     }
 
     /**

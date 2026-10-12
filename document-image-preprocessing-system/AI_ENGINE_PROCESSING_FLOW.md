@@ -37,7 +37,7 @@ Pipeline không dùng UVDoc. `orientation_corrected.jpg` chỉ là output trung 
 | `POST /ocr` | OCR trực tiếp ảnh upload, không chạy tiền xử lý |
 | `POST /preprocess` | Chạy cùng pipeline đầy đủ nhưng chỉ trả file JPEG cuối, không trả OCR JSON |
 
-AI Engine nhận `.jpg`, `.jpeg`, `.png`, `.webp`. File upload được đặt tạm trong `ai-engine/tmp/` rồi xóa. Vì pipeline sử dụng các output chung trong `ai-engine/output/`, `asyncio.Lock` chỉ cho một lượt chạy pipeline đầy đủ (`/process` hoặc `/preprocess`) tại một thời điểm. Endpoint `/ocr` không dùng lock này; OCR trực tiếp dùng `_ocr_predict_lock` riêng trong `ocr_service.py`.
+AI Engine nhận `.jpg`, `.jpeg`, `.png`, `.webp` với dung lượng **không vượt quá 10 MB**. Engine kiểm tra dung lượng, mở ảnh bằng Pillow để xác minh nội dung ảnh, rồi mới chạy OCR/pipeline. Chuẩn **98 KB–3 MB** và **350–4096 px** không áp lên ảnh upload; chúng được áp ở bước resize/enhance để tạo `document_final.jpg`. File upload được đặt tạm trong `ai-engine/tmp/` rồi xóa. Vì pipeline sử dụng các output chung trong `ai-engine/output/`, `asyncio.Lock` chỉ cho một lượt chạy pipeline đầy đủ (`/process` hoặc `/preprocess`) tại một thời điểm. Endpoint `/ocr` không dùng lock này; OCR trực tiếp dùng `_ocr_predict_lock` riêng trong `ocr_service.py`.
 
 ## 3. Các bước tiền xử lý
 
@@ -128,7 +128,7 @@ Sau khi chọn khung, hệ thống dùng padding mặc định 3%; fallback OCR 
 - Deskew dùng Canny + HoughLinesP để ước lượng góc đường văn bản, sau đó xoay với canvas mở rộng.
 - Khử chói tìm vùng sáng/ít bão hòa trong HSV, rồi giảm sáng kênh L của LAB.
 - Khử mờ đo độ sắc nét bằng Laplacian và áp dụng unsharp mask thích ứng.
-- Enhance chỉ thu nhỏ ảnh quá lớn và dùng CLAHE trên kênh sáng LAB. Không phóng to ảnh nhỏ.
+- Enhance dùng CLAHE trên kênh sáng LAB, sau đó chuẩn hóa ảnh kết quả. Ảnh rộng hơn 1600 px được thu nhỏ theo tỷ lệ; ảnh có cạnh nhỏ hơn 350 px được phóng to theo tỷ lệ nếu vẫn không vượt 4096 px, hoặc thêm viền trắng khi cần. JPEG được thử quality từ 95 đến 50; nếu còn lớn hơn 3 MB thì tiếp tục thu nhỏ theo tỷ lệ. Nếu JPEG nhỏ hơn 98 KB, engine thêm JPEG COM segment hợp lệ để đạt mức file tối thiểu mà không thay đổi điểm ảnh. Kết quả `document_final.jpg` luôn có mỗi chiều trong **350–4096 px** và dung lượng **98 KB–3 MB**.
 
 ## 4. OCR trên ảnh cuối
 

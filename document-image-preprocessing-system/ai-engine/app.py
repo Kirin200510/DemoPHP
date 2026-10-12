@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from PIL import Image, UnidentifiedImageError
 from starlette.background import BackgroundTask
 
 from ocr_service import extract_raw_ocr
@@ -78,6 +79,34 @@ ALLOWED_EXTENSIONS = {
     ".webp"
 }
 
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+
+
+def validate_uploaded_image(input_path: Path) -> None:
+    """Kiểm tra dung lượng tối đa và nội dung ảnh của file upload."""
+
+    try:
+        file_size = input_path.stat().st_size
+    except OSError as exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read uploaded image file.",
+        ) from exception
+
+    if file_size > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail="Image file size must not exceed 10 MB.",
+        )
+
+    try:
+        with Image.open(input_path) as image:
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as exception:
+        raise HTTPException(
+            status_code=422,
+            detail="Uploaded file is not a valid image.",
+        ) from exception
 
 # =========================================================
 # HEALTH CHECK
@@ -254,6 +283,8 @@ async def process_document(
 
         await file.close()
 
+        validate_uploaded_image(input_path)
+
         processed_image, raw_ocr, structured_ocr, face_crop_image = await run_full_pipeline(
             input_path
         )
@@ -324,6 +355,8 @@ async def ocr(
             )
 
         await file.close()
+
+        validate_uploaded_image(input_path)
 
         return await asyncio.to_thread(
             extract_raw_ocr,
@@ -409,6 +442,8 @@ async def preprocess(
             )
 
         await file.close()
+
+        validate_uploaded_image(input_path)
 
 
         print()

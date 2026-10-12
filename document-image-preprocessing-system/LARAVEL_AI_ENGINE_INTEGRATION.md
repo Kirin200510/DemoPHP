@@ -49,7 +49,7 @@ Nếu AI Engine, payload JSON/base64 hoặc thao tác lưu file lỗi, Laravel c
 | `POST /ocr` | Raw OCR trực tiếp trên ảnh upload, không tiền xử lý | Không |
 | `POST /preprocess` | Chạy pipeline và trả riêng JPEG cuối | Không |
 
-AI Engine chỉ nhận `.jpg`, `.jpeg`, `.png`, `.webp`; các request pipeline được tuần tự hóa bởi lock vì output debug dùng tên file cố định. Timeout phía FastAPI là 300 giây; timeout Laravel lấy từ `AI_ENGINE_TIMEOUT` (mặc định 360 giây).
+AI Engine chỉ nhận `.jpg`, `.jpeg`, `.png`, `.webp` có dung lượng không quá **10 MB**. Laravel kiểm tra giới hạn upload này trước khi lưu; FastAPI kiểm tra lại file thực tế trước khi chạy OCR/pipeline để request gọi trực tiếp không bỏ qua được giới hạn. Sau tiền xử lý, `test_enhance.py` chuẩn hóa `document_final.jpg` về **98 KB–3 MB** và mỗi chiều **350–4096 px**. Các request pipeline được tuần tự hóa bởi lock vì output debug dùng tên file cố định. Timeout phía FastAPI là 300 giây; timeout Laravel lấy từ `AI_ENGINE_TIMEOUT` (mặc định 360 giây).
 
 ## Thành phần Laravel
 
@@ -57,7 +57,7 @@ AI Engine chỉ nhận `.jpg`, `.jpeg`, `.png`, `.webp`; các request pipeline �
 | --- | --- |
 | `routes/web.php` | Route hồ sơ, ảnh private, review, admin và quick login local/testing |
 | `DocumentController` | Lưu file, gọi AI Engine, chuyển trạng thái, kiểm tra Policy và audit log |
-| `StoreDocumentRequest` | Chỉ nhận JPG/JPEG/PNG/WEBP, tối đa 10 MB |
+| `StoreDocumentRequest` | Chỉ nhận JPG/JPEG/PNG/WEBP, dung lượng upload tối đa 10 MB |
 | `AiImageProcessor` | HTTP client gọi `/process`, kiểm tra JSON/media type/base64 |
 | `ImageDocument` | Metadata, owner/reviewer, trạng thái, path, raw/structured OCR |
 | `ImageDocumentPolicy` | Kiểm soát quyền trên từng hồ sơ và face crop |

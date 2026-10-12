@@ -9,7 +9,8 @@ Hệ thống Laravel kết hợp FastAPI để xử lý ảnh giấy tờ, đọ
 - Chuẩn hóa OCR cho CCCD, giấy phép lái xe và giấy chứng nhận đăng ký xe; giữ lại các dòng chưa gán trường.
 - Crop khuôn mặt bằng YuNet khi model phát hiện được mặt.
 - Đăng ký/đăng nhập/quên mật khẩu với Laravel Fortify; role/permission với Spatie Laravel Permission; Policy bảo vệ hồ sơ theo chủ sở hữu.
-- Ba vai trò: `customer`, `processor`/`reviewer`, `admin`; có luồng gửi hồ sơ, xác thực hoặc yêu cầu gửi lại.
+- Ba nhóm người dùng: khách hàng (`customer`), nhân viên xử lý (`processor` hoặc `reviewer`) và quản trị viên (`admin`); có luồng gửi hồ sơ, xác thực hoặc yêu cầu gửi lại.
+- Ảnh upload: JPG/JPEG/PNG/WEBP, dung lượng tối đa 10 MB. Laravel và FastAPI cùng kiểm tra giới hạn này. Ở bước resize/enhance sau crop, ảnh cuối `document_final.jpg` được chuẩn hóa về 98 KB–3 MB và mỗi chiều 350–4096 px.
 
 ## Kiến trúc
 
