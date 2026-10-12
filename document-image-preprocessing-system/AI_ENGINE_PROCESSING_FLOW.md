@@ -56,11 +56,72 @@ AI Engine nhận `.jpg`, `.jpeg`, `.png`, `.webp`. File upload được đặt t
 
 ### 3.2 Xác định góc và perspective crop
 
-`test_document_crop.py` dùng OpenCV với nhiều nhánh fallback hình học, không dùng YOLO và không dùng model detect tài liệu chuyên biệt. Các nhánh kết hợp Canny/morphology, contour tứ giác, mask HSV/LAB theo màu giấy tờ, `minAreaRect`, đường Hough và bố cục vùng chữ. Ứng viên được chấm theo diện tích, tỷ lệ thẻ, độ chữ nhật, góc và mức hợp lý so với ảnh.
+**Script:** `test_document_crop.py`<br>
+**Input:** `output/orientation_corrected.jpg`<br>
+**Output chính:** `output/document_crop.jpg`
 
-Khi các nhánh hình học không tìm được khung tin cậy, fallback bố cục chữ gọi `detect_text_lines()` của PP-OCRv5 để lấy các polygon text, bao vùng text bằng `minAreaRect` rồi suy ra khung giấy tờ. Vì vậy ở trường hợp fallback này PP-OCRv5 detector chạy một lần trong bước crop; sau đó bước OCR chính vẫn chạy detector lại trên `document_final.jpg` để đọc toàn bộ nội dung.
+Ảnh được thu nhỏ sao cho cạnh dài tối đa 1200 px khi nhận diện để giảm chi phí xử lý. Sau khi tìm được góc, tọa độ được quy đổi ngược về kích thước ảnh gốc. Bốn góc luôn được chuẩn hóa theo thứ tự:
 
-Nếu tìm được bốn điểm, điểm được sắp theo thứ tự trên-trái, trên-phải, dưới-phải, dưới-trái rồi dùng `cv2.getPerspectiveTransform` + `cv2.warpPerspective` để crop và làm phẳng. Nếu không có khung đủ tin cậy, hệ thống giữ toàn ảnh thay vì cắt mất nội dung.
+```text
+P1: trên-trái     P2: trên-phải
+P4: dưới-trái     P3: dưới-phải
+```
+
+#### Mô hình sử dụng
+
+Bước xác định bốn góc không dùng YOLO, segmentation model hoặc model AI chuyên phát hiện giấy tờ. Phần lớn cơ chế là thuật toán OpenCV và luật hình học. Riêng fallback cuối về bố cục chữ mới gọi **detector** PP-OCRv5 để lấy polygon các vùng chữ; recognizer OCR không được dùng để quyết định bốn góc.
+
+#### Cơ chế tìm bốn góc
+
+**Nhánh chính — biên và contour:**
+
+1. Chuyển ảnh sang grayscale, Gaussian blur, Canny (`40/120`) và morphology close kernel `7x7` để nối các cạnh giấy tờ bị đứt.
+2. Lấy contour bằng `RETR_LIST`, xấp xỉ với `approxPolyDP` có epsilon bằng 2% chu vi.
+3. Chỉ giữ contour lồi có đúng bốn đỉnh, sắp theo thứ tự trên-trái, trên-phải, dưới-phải, dưới-trái.
+4. Chấm điểm những ứng viên còn lại, lấy ứng viên có điểm lớn nhất.
+
+**Bộ lọc và chấm điểm ứng viên:**
+
+| Tiêu chí | Quy tắc hiện tại | Vai trò |
+| --- | --- | --- |
+| Diện tích contour | Từ 8% đến 95% diện tích ảnh detect | Bỏ nhiễu nhỏ và contour gần bằng toàn khung. |
+| Tỷ lệ dài/rộng | 1,35–2,20 theo `minAreaRect` | Giữ ứng viên có dáng thẻ/giấy tờ. |
+| Độ lấp đầy hình chữ nhật | Tối thiểu 0,45 diện tích `minAreaRect` | Loại vùng méo, rời rạc hoặc chỉ là chi tiết bên trong. |
+| Hai cạnh đối diện | Độ tương đồng của mỗi cặp tối thiểu 0,60 | Hạn chế hình thang quá méo và cạnh giả. |
+| Góc | Sai số góc trung bình so với 90° không quá 35° | Kiểm tra tứ giác gần với khung giấy tờ. |
+| Mép khung hình | Đỉnh trong biên 1% ảnh bị nhân điểm 0,7 | Không ưu tiên contour chạm mép ảnh. |
+
+Điểm cuối là tích của tỷ lệ diện tích, độ chữ nhật, độ tương đồng hai cặp cạnh, độ gần với tỷ lệ tham chiếu 1,586 và điểm góc. Các ngưỡng là luật tổng quát để phân biệt giấy tờ với hình chữ nhật khác, không được gắn với một file ảnh cụ thể.
+
+**Nhánh theo màu và ROI:**
+
+Nếu nhánh cạnh không có tứ giác phù hợp, hệ thống tạo mask HSV cho vùng xanh/xanh xám của CCCD và thử contour tứ giác từ mask. Khi mask chỉ tạo được vùng màu thô, ROI của vùng đó được mở rộng rồi chạy lại detector cạnh bên trong ROI.
+
+Một mask HSV riêng cho giấy tờ vàng/be như giấy phép lái xe dùng Hue 10–45, Saturation từ 10, Value từ 80 và morphology close kernel `17x17`. Mask CCCD dùng Hue 70–155, Saturation từ 10, Value từ 40; fallback của nó thử kernel close 5, 15 và 31 rồi chọn ứng viên tốt nhất. Cả hai dùng `minAreaRect`, diện tích 3–90% ảnh, tỷ lệ 1,35–2,20, độ chữ nhật tối thiểu 0,40 và loại khung vượt biên ảnh. Nhánh vàng/be không trim contour để tránh cắt nội dung sát mép; nhánh CCCD chỉ trim 4% biên khi kết quả vẫn giữ ít nhất 92% chiều rộng/cao của khung ban đầu. Nếu ứng viên CCCD thắng, crop được nới 10% vì mask màu có thể bỏ sót vùng sáng hoặc viền nhựa trong.
+
+#### Fallback hình học
+
+Khi contour không đủ bốn cạnh rõ ràng, các fallback chạy theo thứ tự. Hình dưới chỉ minh họa cơ chế, không phải kết quả detection của ảnh người dùng.
+
+![Các tình huống fallback hình học](ai-engine/fallback-geometric-examples.png)
+
+1. **`minAreaRect` từ cạnh ngoài hoặc mask màu.** Dùng contour ngoài cùng của Canny hoặc contour mask màu để tạo hình chữ nhật xoay. Nhánh edge chỉ nhận vùng 3–80% ảnh; vùng nhỏ chạm mép bị loại để không nhầm ảnh chân dung/khối chữ thành cả giấy tờ.
+2. **Hộp bao HSV thô.** Khi một cạnh bị che hoặc mask màu không khép kín, dùng bbox của vùng HSV bao ngoài; bbox chỉ được nhận nếu tỷ lệ, diện tích và khoảng cách đến biên ảnh hợp lý.
+3. **Ghép đường phối cảnh bằng Hough Lines.** Từ các cặp đường ngang/dọc nghiêng, lấy giao điểm để tạo bốn góc, kiểm tra diện tích dự đoán và mức độ các cạnh dự đoán được edge hỗ trợ.
+4. **Khôi phục từ ba cạnh khi bị che.** Khi chỉ còn ba cạnh rõ, hệ thống suy ra cạnh thiếu theo các tỷ lệ giấy tờ hợp lệ rồi kiểm tra support của ba cạnh tốt nhất. Nếu cả nhánh ba cạnh và phối cảnh đều có kết quả, nhánh ba cạnh chỉ được ưu tiên khi diện tích lớn hơn ứng viên phối cảnh trên 1,35 lần.
+5. **Tách giấy tờ khỏi nền đồng nhất.** Ước lượng màu nền bằng median của bốn dải biên trong LAB, lấy vùng có khoảng cách màu lớn hơn nền, morphology close rồi kiểm tra lại diện tích, tỷ lệ và độ chữ nhật.
+6. **Fallback bố cục chữ.** Chỉ sau khi nhánh cạnh/màu/hình học thất bại, `detect_text_lines()` của PP-OCRv5 lấy polygon ít nhất sáu dòng chữ. `minAreaRect` bao các polygon đó phải có tỷ lệ 1,35–2,20 và chiếm 4–65% ảnh; khung chữ được nới 18% để suy ra khung giấy tờ. Detector này chỉ dùng polygon, không dùng nội dung hay dữ liệu nhận dạng OCR.
+7. **Fallback toàn ảnh an toàn.** Nếu không còn ứng viên, hoặc ứng viên chỉ là một dải dọc/ngang chạm biên trong khi ảnh nguồn đã có tỷ lệ thẻ, hệ thống giữ bốn góc toàn ảnh để không crop nhầm và làm mất nội dung.
+
+#### Từ bốn góc đến ảnh crop
+
+Sau khi chọn khung, hệ thống dùng padding mặc định 3%; fallback OCR text-layout dùng 2%, fallback toàn khung dùng 0%, còn fallback màu CCCD hoặc nhánh phối cảnh có thể dùng 10% theo quy tắc phía trên. `cv2.getPerspectiveTransform` tạo homography và `cv2.warpPerspective` biến đổi tứ giác thành ảnh chữ nhật phẳng. Đây là bước vừa crop vừa nắn phối cảnh, kết quả là `document_crop.jpg`.
+
+| File | Mục đích |
+| --- | --- |
+| `output/document_detection.jpg` | Vẽ bốn góc cuối cùng trên ảnh gốc. |
+| `output/document_mask.jpg` | Mask/cạnh của nhánh được dùng khi có mask debug. |
+| `output/document_crop.jpg` | Ảnh đã crop và chỉnh phối cảnh. |
 
 ### 3.3 Deskew, khử chói, khử mờ và enhance
 
