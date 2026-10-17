@@ -3,13 +3,11 @@ import numpy as np
 import os
 
 
-INPUT_IMAGE = "output/document_deskew.jpg"
-
-OUTPUT_DIR = "output"
-
-GLARE_MASK = f"{OUTPUT_DIR}/glare_mask.jpg"
-GLARE_DETECTION = f"{OUTPUT_DIR}/glare_detection.jpg"
-OUTPUT_IMAGE = f"{OUTPUT_DIR}/document_deglare.jpg"
+OUTPUT_DIR = os.getenv("PIPELINE_OUTPUT_DIR", "output")
+INPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_deskew.jpg")
+GLARE_MASK = os.path.join(OUTPUT_DIR, "glare_mask.jpg")
+GLARE_DETECTION = os.path.join(OUTPUT_DIR, "glare_detection.jpg")
+OUTPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_deglare.jpg")
 
 
 # =========================================================

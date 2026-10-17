@@ -9,7 +9,11 @@
             <h1 class="mt-2 text-3xl font-bold text-white">Quản lý tài khoản</h1>
             <p class="mt-1 text-sm text-slate-400">Mở/khóa tài khoản và gán vai trò.</p>
         </div>
-        <a href="{{ route('admin.audit-logs') }}" class="text-sm text-cyan-300 hover:text-cyan-200">Xem nhật ký truy cập →</a>
+        <div class="flex gap-4 text-sm">
+            <a href="{{ route('admin.processing-metrics') }}" class="text-cyan-300 hover:text-cyan-200">Giám sát xử lý AI →</a>
+            <a href="{{ route('admin.ocr-vendor') }}" class="text-cyan-300 hover:text-cyan-200">Cấu hình OCR vendor →</a>
+            <a href="{{ route('admin.audit-logs') }}" class="text-cyan-300 hover:text-cyan-200">Xem nhật ký truy cập →</a>
+        </div>
     </div>
 
     @if (session('success'))

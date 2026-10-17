@@ -1,0 +1,63 @@
+# Copy this file to /etc/nginx/sites-available/document-image-preprocessing-system,
+# replace documents.example.com and certificate paths, then enable the site.
+# The Laravel application must only be reachable through this reverse proxy.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name documents.example.com;
+
+    # Keep this location reachable for Let's Encrypt certificate renewal.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/document-image-preprocessing-system/public;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name documents.example.com;
+
+    root /var/www/document-image-preprocessing-system/public;
+    index index.php;
+    client_max_body_size 12m;
+
+    ssl_certificate /etc/letsencrypt/live/documents.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/documents.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:TLS:10m;
+    ssl_session_tickets off;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        # Keep the browser request open while Laravel waits for local OCR.
+        fastcgi_connect_timeout 15s;
+        fastcgi_send_timeout 600s;
+        fastcgi_read_timeout 600s;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+        fastcgi_param HTTPS on;
+        fastcgi_param HTTP_X_FORWARDED_PROTO https;
+        fastcgi_param HTTP_X_FORWARDED_HOST $host;
+        fastcgi_param HTTP_X_FORWARDED_PORT 443;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}

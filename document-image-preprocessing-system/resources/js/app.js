@@ -17,7 +17,8 @@ if (uploadInput && uploadForm) {
     };
 
     const updatePreview = () => {
-        const [file] = uploadInput.files;
+        const files = Array.from(uploadInput.files);
+        const [file] = files;
 
         if (previewUrl) {
             URL.revokeObjectURL(previewUrl);
@@ -38,7 +39,9 @@ if (uploadInput && uploadForm) {
         preview.src = previewUrl;
         preview.classList.remove('hidden');
         placeholder.classList.add('hidden');
-        selectedFileName.textContent = file.name;
+        selectedFileName.textContent = files.length === 1
+            ? file.name
+            : files.length + ' ảnh đã chọn: ' + files.map((selected) => selected.name).join(', ');
         selectedFile.classList.remove('hidden');
         selectedFile.classList.add('flex');
         updateProcessButton();

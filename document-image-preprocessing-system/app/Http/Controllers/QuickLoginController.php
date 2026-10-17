@@ -40,6 +40,6 @@ class QuickLoginController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect()->intended(route('documents.create'));
+        return redirect()->to(route('documents.create'));
     }
 }

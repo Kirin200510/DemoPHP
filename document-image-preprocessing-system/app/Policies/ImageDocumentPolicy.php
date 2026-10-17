@@ -73,7 +73,8 @@ class ImageDocumentPolicy
 
     public function updateStructuredOcr(User $user, ImageDocument $imageDocument): bool
     {
-        return $imageDocument->user_id === $user->id
+        return $imageDocument->merged_into_document_id === null
+            && $imageDocument->user_id === $user->id
             && $user->can('documents.edit-structured-ocr-own')
             && in_array($imageDocument->status, [
                 ImageDocument::STATUS_COMPLETED,
@@ -83,7 +84,8 @@ class ImageDocumentPolicy
 
     public function submitForReview(User $user, ImageDocument $imageDocument): bool
     {
-        return $imageDocument->user_id === $user->id
+        return $imageDocument->merged_into_document_id === null
+            && $imageDocument->user_id === $user->id
             && $user->can('documents.submit-review')
             && in_array($imageDocument->status, [
                 ImageDocument::STATUS_COMPLETED,
@@ -93,7 +95,8 @@ class ImageDocumentPolicy
 
     public function review(User $user, ImageDocument $imageDocument): bool
     {
-        return $user->can('documents.verify')
+        return $imageDocument->merged_into_document_id === null
+            && $user->can('documents.verify')
             && $user->hasAnyRole(['processor', 'reviewer'])
             && $imageDocument->status === ImageDocument::STATUS_PENDING_REVIEW;
     }

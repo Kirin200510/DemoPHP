@@ -4,9 +4,9 @@ import os
 import cv2
 
 
-INPUT_IMAGE = "output/document_deblur.jpg"
-OUTPUT_DIR = "output"
-OUTPUT_IMAGE = f"{OUTPUT_DIR}/document_final.jpg"
+OUTPUT_DIR = os.getenv("PIPELINE_OUTPUT_DIR", "output")
+INPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_deblur.jpg")
+OUTPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_final.jpg")
 
 MIN_OUTPUT_BYTES = 98 * 1024
 MAX_OUTPUT_BYTES = 3 * 1024 * 1024

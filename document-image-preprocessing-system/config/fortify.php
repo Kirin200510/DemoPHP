@@ -73,7 +73,17 @@ return [
     |
     */
 
-    'home' => '/',
+    /*
+    |--------------------------------------------------------------------------
+    | Absolute Authentication Redirect URL
+    |--------------------------------------------------------------------------
+    |
+    | An absolute URL preserves the configured application scheme, host, and
+    | port when Laravel handles an authentication redirect.
+    |
+    */
+
+    'home' => rtrim((string) env('APP_URL', 'http://localhost'), '/').'/',
 
     /*
     |--------------------------------------------------------------------------

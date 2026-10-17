@@ -4,7 +4,7 @@
 
 @section('content')
     <div class="mb-8">
-        <a href="{{ route('admin.users') }}" class="text-sm text-cyan-300 hover:text-cyan-200">← Quản lý tài khoản</a>
+        <div class="flex gap-4 text-sm"><a href="{{ route('admin.users') }}" class="text-cyan-300 hover:text-cyan-200">← Quản lý tài khoản</a><a href="{{ route('admin.processing-metrics') }}" class="text-cyan-300 hover:text-cyan-200">Giám sát xử lý AI →</a></div>
         <h1 class="mt-2 text-3xl font-bold text-white">Nhật ký truy cập</h1>
         <p class="mt-1 text-sm text-slate-400">Theo dõi các hành động trên tài khoản và hồ sơ.</p>
     </div>

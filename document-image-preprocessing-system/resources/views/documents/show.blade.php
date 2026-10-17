@@ -27,34 +27,47 @@
         </div>
     @endif
 
-    <section class="grid gap-6 {{ $document->processed_path ? 'lg:grid-cols-2' : '' }}">
-        <article class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-            <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
-                <div>
-                    <h2 class="font-semibold text-white">Ảnh gốc</h2>
-                    <p class="text-xs text-slate-400">Tệp người dùng tải lên</p>
-                </div>
-                <span class="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-400">Original</span>
-            </div>
-            <div class="grid min-h-96 place-items-center bg-slate-900/60 p-4">
-                <img src="{{ route('documents.original', $document) }}" alt="Ảnh giấy tờ gốc" class="max-h-[36rem] w-full object-contain">
-            </div>
-        </article>
+    @php
+        $documentSides = collect([$document])
+            ->merge($document->mergedDocumentSides)
+            ->unique('id')
+            ->values();
+        $hasPairedSides = $documentSides->count() === 2;
+    @endphp
 
-        @if ($document->processed_path)
-            <article class="overflow-hidden rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.04]">
+    <section class="grid gap-6 {{ $hasPairedSides ? 'xl:grid-cols-2' : ($document->processed_path ? 'lg:grid-cols-2' : '') }}">
+        @foreach ($documentSides as $sideDocument)
+            @php
+                $sideLabel = $sideDocument->is($document) ? 'Mặt trước' : 'Mặt sau';
+            @endphp
+            <article class="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
                 <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
                     <div>
-                        <h2 class="font-semibold text-white">Ảnh sau xử lý</h2>
+                        <h2 class="font-semibold text-white">Ảnh gốc · {{ $sideLabel }}</h2>
+                        <p class="text-xs text-slate-400">Tệp người dùng tải lên</p>
+                    </div>
+                    <span class="rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-400">Original</span>
+                </div>
+                <div class="grid min-h-96 place-items-center bg-slate-900/60 p-4">
+                    <img src="{{ route('documents.original', $sideDocument) }}" alt="Ảnh giấy tờ gốc {{ $sideLabel }}" class="max-h-[36rem] w-full object-contain">
+                </div>
+            </article>
+
+            @if ($sideDocument->processed_path)
+                <article class="overflow-hidden rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.04]">
+                <div class="flex items-center justify-between border-b border-white/10 px-5 py-4">
+                    <div>
+                        <h2 class="font-semibold text-white">Ảnh sau xử lý · {{ $sideLabel }}</h2>
                         <p class="text-xs text-slate-400">Kết quả cuối từ AI engine</p>
                     </div>
                     <span class="rounded-full bg-cyan-400/10 px-2.5 py-1 text-xs text-cyan-300">Final</span>
                 </div>
                 <div class="grid min-h-96 place-items-center bg-slate-900/60 p-4">
-                    <img src="{{ route('documents.processed', $document) }}" alt="Ảnh giấy tờ sau xử lý" class="max-h-[36rem] w-full object-contain">
+                    <img src="{{ route('documents.processed', $sideDocument) }}" alt="Ảnh giấy tờ sau xử lý {{ $sideLabel }}" class="max-h-[36rem] w-full object-contain">
                 </div>
-            </article>
-        @endif
+                </article>
+            @endif
+        @endforeach
     </section>
 
     @php
@@ -80,27 +93,166 @@
     @endif
     @endcan
 
+    @php
+        $pairingData = data_get($document->ocr_structured_data, 'pairing');
+        $pairedNormalizedOcr = data_get($document->ocr_structured_data, 'paired_normalized_ocr');
+    @endphp
+
+    @if (is_array($pairingData))
+        @php
+            $pairingStatus = data_get($pairingData, 'status');
+            $pairingSectionClass = match ($pairingStatus) {
+                'matched' => 'border-emerald-400/30 bg-emerald-400/[0.05]',
+                'not_matched' => 'border-red-400/30 bg-red-400/[0.05]',
+                default => 'border-amber-400/30 bg-amber-400/[0.05]',
+            };
+            $pairingBadgeClass = match ($pairingStatus) {
+                'matched' => 'bg-emerald-400/10 text-emerald-300',
+                'not_matched' => 'bg-red-400/10 text-red-200',
+                default => 'bg-amber-400/10 text-amber-200',
+            };
+        @endphp
+        <section class="mt-7 overflow-hidden rounded-2xl border {{ $pairingSectionClass }}">
+            <div class="flex flex-col gap-2 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h2 class="font-semibold text-white">Đối chiếu hai mặt CCCD</h2>
+                    <p class="mt-1 text-xs text-slate-400">OCR từng ảnh độc lập, sau đó kiểm tra số định danh giữa mặt trước và mặt sau.</p>
+                </div>
+                <span class="w-fit rounded-full px-3 py-1 text-xs font-semibold {{ $pairingBadgeClass }}">
+                    {{ match ($pairingStatus) { 'matched' => 'Đã khớp 2 mặt', 'not_matched' => 'Không khớp 2 mặt', default => 'Chưa đủ bằng chứng / cần kiểm tra' } }}
+                </span>
+            </div>
+
+            <div class="p-5">
+                @if (data_get($pairingData, 'matching_method'))
+                    <p class="mb-3 text-xs text-slate-400">Phương pháp đối chiếu: {{ match (data_get($pairingData, 'matching_method')) { 'barcode' => 'Mã vạch', 'mrz_and_barcode' => 'MRZ và mã vạch', default => 'MRZ' } }}</p>
+                @endif
+                @if ($pairingStatus === 'matched' && is_array($pairedNormalizedOcr))
+                    <p class="mb-4 text-sm text-emerald-100">Dữ liệu mặt trước và mặt sau đã được gộp; giá trị mặt trước được ưu tiên, mặt sau bổ sung các trường còn thiếu.</p>
+                    <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        @foreach (data_get($pairedNormalizedOcr, 'fields', []) as $fieldName => $fieldData)
+                            <div class="rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                                <dt class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ data_get($fieldData, 'label', $fieldName) }}</dt>
+                                <dd class="mt-1 break-words font-medium text-slate-100">{{ data_get($fieldData, 'normalized_value', data_get($fieldData, 'raw_value', 'Chưa nhận diện được')) }}</dd>
+                                <dd class="mt-1 text-[11px] text-slate-500">Nguồn: {{ data_get($fieldData, 'source_side', 'không xác định') }}</dd>
+                            </div>
+                        @endforeach
+                    </dl>
+                @else
+                    <p class="text-sm {{ $pairingStatus === 'not_matched' ? 'text-red-200' : 'text-amber-100' }}">{{ data_get($pairingData, 'error.message', 'Chưa đủ thông tin để xác nhận hai mặt thuộc cùng giấy tờ.') }}</p>
+                    <p class="mt-2 text-sm text-slate-300">Hai ảnh và kết quả OCR riêng vẫn được lưu, chưa gộp hồ sơ. Bạn có thể chọn lại ảnh hoặc yêu cầu nhân viên kiểm tra thủ công.</p>
+                    <a href="{{ route('documents.create') }}" class="mt-3 inline-block text-sm text-cyan-300">Chọn lại ảnh</a>
+                @endif
+                @if (is_array(data_get($pairingData, 'checks')))
+                    @php
+                        $checkLabels = [
+                            'mrz_positions_6_14_matches_front_suffix' => '9 số cuối CCCD với MRZ vị trí 6–14',
+                            'mrz_positions_16_27_matches_front_number' => '12 số CCCD với MRZ vị trí 16–27',
+                            'barcode_identifier_matches_front_number' => 'Số CCCD với mã vạch mặt sau',
+                            'barcode_full_name_matches_front' => 'Họ tên với mã vạch',
+                            'barcode_date_of_birth_matches_front' => 'Ngày sinh với mã vạch',
+                            'barcode_sex_matches_front' => 'Giới tính với mã vạch',
+                            'mrz_full_name_matches_front' => 'Họ tên với MRZ',
+                            'mrz_date_of_birth_matches_front' => 'Ngày sinh với MRZ',
+                        ];
+                    @endphp
+                    <ul class="mt-3 space-y-1 text-xs text-slate-300">
+                        @foreach (data_get($pairingData, 'checks', []) as $check => $passed)
+                            <li>{{ $checkLabels[$check] ?? $check }}: {{ $passed === true ? 'Khớp' : ($passed === false ? 'Không khớp' : 'Chưa đủ dữ liệu') }}</li>
+                        @endforeach
+                    </ul>
+                @endif
+            </div>
+        </section>
+    @endif
+
+    @php
+        $barcodeRecords = data_get($document->ocr_structured_data, 'barcodes.records', []);
+        $barcodeWarnings = data_get($document->ocr_structured_data, 'barcodes.warnings', []);
+    @endphp
+    @if ($barcodeRecords !== [] || $barcodeWarnings !== [])
+        <section class="mt-7 rounded-2xl border border-white/10 bg-slate-900/40 p-5">
+            <h2 class="font-semibold text-white">Đọc mã vạch local</h2>
+            @foreach ($barcodeRecords as $barcodeRecord)
+                <p class="mt-2 text-sm text-slate-300">{{ data_get($barcodeRecord, 'format', 'Mã vạch') }}:
+                    @if (data_get($barcodeRecord, 'parsed.status') === 'parsed')
+                        Đã đọc và phân tích được nội dung định danh. Đây là bằng chứng đối chiếu, không phải xác thực giấy tờ thật.
+                    @else
+                        Đã đọc mã vạch nhưng chưa hỗ trợ cấu trúc nội dung; chưa dùng làm bằng chứng ghép đôi.
+                    @endif
+                </p>
+            @endforeach
+            @if ($barcodeWarnings !== [])
+                <p class="mt-2 text-sm text-amber-200">Bộ đọc mã vạch gặp lỗi. Kết quả OCR độc lập vẫn được giữ nguyên.</p>
+            @endif
+        </section>
+    @endif
+
     @if ($document->ocr_structured_data)
         @php
             $structuredData = $document->ocr_structured_data;
-            $structuredFields = data_get($structuredData, 'fields', []);
-            $documentType = data_get($structuredData, 'document');
+            $pairedStructuredData = data_get($structuredData, 'paired_normalized_ocr');
+            $isPairedResult = data_get($structuredData, 'pairing.status') === 'matched'
+                && is_array($pairedStructuredData);
+            $structuredFields = $isPairedResult
+                ? data_get($pairedStructuredData, 'fields', [])
+                : data_get($structuredData, 'fields', []);
+            $documentType = $isPairedResult
+                ? data_get($pairedStructuredData, 'document', data_get($structuredData, 'document'))
+                : data_get($structuredData, 'document');
             $verificationData = data_get($structuredData, 'verification', []);
-            $unmappedRawLines = data_get($structuredData, 'unmapped_raw_lines', []);
-            $allOcrLines = data_get($document->ocr_raw_data, 'lines', []);
+            $unmappedRawLines = $isPairedResult
+                ? data_get($pairedStructuredData, 'unmapped_raw_lines', [])
+                : data_get($structuredData, 'unmapped_raw_lines', []);
+            $allOcrLines = $isPairedResult
+                ? data_get($pairedStructuredData, 'all_ocr_lines', [])
+                : data_get($document->ocr_raw_data, 'lines', []);
+
+            if ($isPairedResult && $allOcrLines === []) {
+                $allOcrLines = $documentSides
+                    ->flatMap(static function (\App\Models\ImageDocument $sideDocument) use ($document): array {
+                        $sourceSide = $sideDocument->is($document) ? 'front' : 'back';
+
+                        return array_map(
+                            static function (array $line) use ($sourceSide): array {
+                                $line['source_side'] = $sourceSide;
+
+                                return $line;
+                            },
+                            data_get($sideDocument->ocr_raw_data, 'lines', []),
+                        );
+                    })
+                    ->values()
+                    ->all();
+            }
             $documentTypeKey = data_get($documentType, 'document_type');
             $displayProfiles = [
-                'citizen_identity_card' => [
+                'citizen_identity_card_new' => [
+                    'document_label' => 'CCCD mới',
+                    'fields' => [
+                        'personal_identification_number' => 'Số định danh cá nhân/Personal identification number',
+                        'full_name' => 'Họ, chữ đệm và tên khai sinh/Full name',
+                        'date_of_birth' => 'Ngày, tháng, năm sinh/Date of birth',
+                        'sex' => 'Giới tính/Sex',
+                        'nationality' => 'Quốc tịch/Nationality',
+                        'residence' => 'Nơi cư trú/Place of residence',
+                        'place_of_birth' => 'Nơi đăng ký khai sinh/Place of birth',
+                        'issue_date' => 'Ngày, tháng, năm cấp/Date of issue',
+                        'expiry_date' => 'Ngày, tháng, năm hết hạn/Date of expiry',
+                    ],
+                ],
+                'citizen_identity_card_legacy' => [
                     'document_label' => 'CCCD',
                     'fields' => [
                         'cccd_number' => 'Số/No',
                         'full_name' => 'Họ và tên',
-                        'sex' => 'Giới tính',
                         'date_of_birth' => 'Ngày sinh',
+                        'sex' => 'Giới tính',
                         'nationality' => 'Quốc tịch',
                         'place_of_origin' => 'Quê quán',
                         'residence' => 'Nơi thường trú',
-                        'expiry_date' => 'Có giá trị đến',
+                        'personal_identification' => 'Đặc điểm nhân dạng/Personal identification',
+                        'date_month_year' => 'Ngày, tháng, năm/Date, month, year',
                     ],
                 ],
                 'driver_license' => [
@@ -135,8 +287,18 @@
                     ],
                 ],
             ];
-            $displayProfile = $displayProfiles[$documentTypeKey] ?? null;
+            $displayProfileKey = $documentTypeKey === 'citizen_identity_card'
+                ? 'citizen_identity_card_'.data_get($documentType, 'card_version', 'legacy')
+                : $documentTypeKey;
+            $displayProfile = $displayProfiles[$displayProfileKey] ?? null;
             $displayFields = data_get($displayProfile, 'fields', []);
+
+            if ($isPairedResult && $documentTypeKey === 'citizen_identity_card') {
+                $displayFields = array_merge(
+                    $displayProfiles['citizen_identity_card_legacy']['fields'],
+                    $displayProfiles['citizen_identity_card_new']['fields'],
+                );
+            }
 
             if (
                 $documentTypeKey === 'citizen_identity_card'
@@ -177,7 +339,9 @@
                 @if ($displayFields)
                     <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         @foreach ($displayFields as $fieldName => $fieldLabel)
-                            @php($fieldData = data_get($structuredFields, $fieldName, []))
+                            @php
+                                $fieldData = data_get($structuredFields, $fieldName, []);
+                            @endphp
                             <div class="rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
                                 <dt class="text-xs font-medium uppercase tracking-wide text-slate-500">
                                     {{ $fieldLabel }}
@@ -197,7 +361,9 @@
                             <p class="mt-1 text-xs text-slate-400">Chỉ thay đổi giá trị chuẩn hóa; dữ liệu OCR thô vẫn được bảo toàn.</p>
                             <div class="mt-4 grid gap-3 sm:grid-cols-2">
                                 @foreach ($displayFields as $fieldName => $fieldLabel)
-                                    @php($editableFieldData = data_get($structuredFields, $fieldName, []))
+                                    @php
+                                        $editableFieldData = data_get($structuredFields, $fieldName, []);
+                                    @endphp
                                     <label class="flex flex-col gap-1 text-xs text-slate-400">
                                         {{ $fieldLabel }}
                                         <input name="fields[{{ $fieldName }}]" value="{{ data_get($editableFieldData, 'normalized_value', data_get($editableFieldData, 'raw_value', '')) }}" class="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-400 focus:ring-2">
@@ -211,7 +377,7 @@
                     @can('submitForReview', $document)
                         <form method="POST" action="{{ route('documents.submit-review', $document) }}" class="mt-3">
                             @csrf
-                            <button type="submit" class="h-10 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/20">Gửi hồ sơ cho nhân viên xác thực</button>
+                            <button type="submit" class="h-10 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/20">{{ is_array($pairingData) && data_get($pairingData, 'status') !== 'matched' ? 'Yêu cầu nhân viên kiểm tra thủ công' : 'Gửi hồ sơ cho nhân viên xác thực' }}</button>
                         </form>
                     @endcan
 
@@ -271,6 +437,9 @@
                                     <span class="shrink-0 font-mono text-xs text-slate-500">#{{ data_get($line, 'index', '—') }}</span>
                                     <div class="min-w-0">
                                         <p class="break-words text-sm text-slate-100">{{ data_get($line, 'text', '—') }}</p>
+                                        @if (data_get($line, 'source_side'))
+                                            <p class="mt-1 text-xs text-slate-500">Nguồn: {{ data_get($line, 'source_side') === 'back' ? 'Mặt sau' : 'Mặt trước' }}</p>
+                                        @endif
                                         @if (is_numeric(data_get($line, 'confidence')))
                                             <p class="mt-1 text-xs text-slate-500">Confidence: {{ number_format((float) data_get($line, 'confidence') * 100, 1) }}%</p>
                                         @endif
@@ -294,6 +463,9 @@
                         <thead class="sticky top-0 bg-slate-950/95 text-xs uppercase tracking-wide text-slate-500 backdrop-blur">
                             <tr>
                                 <th scope="col" class="px-5 py-3 font-medium">Dòng</th>
+                                @if ($isPairedResult)
+                                    <th scope="col" class="px-5 py-3 font-medium">Nguồn</th>
+                                @endif
                                 <th scope="col" class="px-5 py-3 font-medium">Nội dung đọc được</th>
                                 <th scope="col" class="px-5 py-3 font-medium">Confidence</th>
                             </tr>
@@ -302,6 +474,9 @@
                             @foreach ($allOcrLines as $line)
                                 <tr class="align-top">
                                     <td class="px-5 py-3 font-mono text-xs text-slate-500">#{{ data_get($line, 'index', '—') }}</td>
+                                    @if ($isPairedResult)
+                                        <td class="px-5 py-3 text-xs text-slate-400">{{ data_get($line, 'source_side') === 'back' ? 'Mặt sau' : 'Mặt trước' }}</td>
+                                    @endif
                                     <td class="max-w-4xl break-words px-5 py-3 text-slate-100">{{ data_get($line, 'text', '—') }}</td>
                                     <td class="whitespace-nowrap px-5 py-3 text-slate-400">
                                         {{ is_numeric(data_get($line, 'confidence')) ? number_format((float) data_get($line, 'confidence') * 100, 1).'%' : '—' }}

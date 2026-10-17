@@ -1,9 +1,11 @@
 import cv2
 import numpy as np
+import os
 
 
-INPUT_IMAGE = "output/document_crop.jpg"
-OUTPUT_IMAGE = "output/document_deskew.jpg"
+OUTPUT_DIR = os.getenv("PIPELINE_OUTPUT_DIR", "output")
+INPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_crop.jpg")
+OUTPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_deskew.jpg")
 
 
 def normalize_angle(angle):

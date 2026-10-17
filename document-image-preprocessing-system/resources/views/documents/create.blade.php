@@ -29,13 +29,14 @@
                 @csrf
 
                 <label id="upload-drop-zone" for="image" class="group relative grid min-h-80 cursor-pointer place-items-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-600 bg-slate-900/70 p-6 text-center transition hover:border-cyan-400 hover:bg-cyan-400/5">
-                    <input id="image" class="sr-only" type="file" name="image" accept="image/jpeg,image/png,image/webp" required>
+                    <input type="hidden" name="image" value="">
+                    <input id="image" class="sr-only" type="file" name="images[]" accept="image/jpeg,image/png,image/webp" multiple required>
                     <img id="image-preview" class="absolute inset-0 hidden size-full object-contain p-3" alt="Xem trước ảnh đã chọn">
                     <span id="upload-placeholder" class="flex flex-col items-center gap-4">
                         <span class="grid size-16 place-items-center rounded-2xl bg-cyan-400/10 text-3xl text-cyan-300 transition group-hover:scale-105">↑</span>
                         <span>
-                            <strong class="block text-base font-semibold text-white">Nhấn để chọn ảnh giấy tờ</strong>
-                            <span class="mt-1 block text-sm text-slate-400">JPG, JPEG, PNG, WEBP · tối đa 10 MB</span>
+                            <strong class="block text-base font-semibold text-white">Nhấn để chọn một hoặc nhiều ảnh giấy tờ</strong>
+                            <span class="mt-1 block text-sm text-slate-400">JPG, JPEG, PNG, WEBP · tối đa 10 MB mỗi ảnh · tối đa 6 ảnh mỗi lần</span>
                         </span>
                     </span>
                 </label>
@@ -49,7 +50,7 @@
                     <span id="process-button-label">Xử lý hình ảnh và OCR</span>
                     <span id="process-spinner" class="hidden size-5 animate-spin rounded-full border-2 border-slate-950/30 border-t-slate-950" aria-hidden="true"></span>
                 </button>
-                <p class="text-center text-xs text-slate-500">Quá trình xử lý ảnh và OCR có thể mất khoảng một phút.</p>
+                <p class="text-center text-xs text-slate-500">Các ảnh được OCR độc lập. Hai mặt CCCD sẽ được đối chiếu ở bước ghép riêng.</p>
             </form>
         </div>
         @else
@@ -107,6 +108,16 @@
                         @endphp
                         <div class="border-t border-white/10 px-4 py-3">
                             <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $statusClass }}">{{ $statusLabel }}</span>
+                            @php
+                                $pairingStatus = data_get($recentDocument->ocr_structured_data, 'pairing.status');
+                            @endphp
+                            @if ($pairingStatus === 'matched')
+                                <span class="ml-1 inline-flex rounded-full bg-emerald-400/10 px-2.5 py-1 text-xs font-semibold text-emerald-300">Đã khớp 2 mặt</span>
+                            @elseif ($pairingStatus === 'not_matched')
+                                <span class="ml-1 inline-flex rounded-full bg-red-400/10 px-2.5 py-1 text-xs font-semibold text-red-200">Không khớp 2 mặt</span>
+                            @elseif ($pairingStatus !== null)
+                                <span class="ml-1 inline-flex rounded-full bg-amber-400/10 px-2.5 py-1 text-xs font-semibold text-amber-200">Cần kiểm tra ghép mặt</span>
+                            @endif
                         </div>
                         @can('review', $recentDocument)
                             <div class="border-t border-amber-400/20 bg-amber-400/[0.06] px-4 py-3">

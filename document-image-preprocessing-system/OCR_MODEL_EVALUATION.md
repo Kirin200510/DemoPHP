@@ -1,106 +1,101 @@
-# Đánh giá và lựa chọn OCR model
+# OCR model, provider và phạm vi đánh giá
 
-## Mục tiêu
+Đối chiếu với `ai-engine/ocr_service.py`, `ai-engine/app.py`, `SystemSetting` và `structured_extraction.py` ngày **17/10/2026**. Tài liệu mô tả những nhánh đã được triển khai. Project chưa có báo cáo benchmark chuẩn hóa đủ để kết luận một model/provider chính xác hoặc nhanh nhất.
 
-OCR phải đọc tối đa nội dung tiếng Việt trên ảnh giấy tờ đã qua pipeline tiền xử lý, đồng thời giữ tọa độ polygon để chuẩn hóa dữ liệu theo bố cục. Kết quả OCR không được xem là dữ liệu đã xác thực: confidence chỉ hỗ trợ đối chiếu với ảnh gốc.
-
-## Tổ hợp đang chạy
+## 1. Luồng mặc định: local_hybrid
 
 ```text
-document_final.jpg
-  -> PP-OCRv5_server_det: polygon + detection confidence
-  -> perspective warp từng polygon
-  -> VietOCR vgg_transformer: text tiếng Việt + recognition confidence
-  -> structured_extraction.py: nhận diện loại giấy tờ, gán field, ghép địa chỉ nhiều dòng
+Ảnh cuối document_final.jpg
+  → PP-OCRv5_server_det: polygon + detection_confidence
+  → expand_polygon / crop_text_line: nắn từng dòng theo phối cảnh
+  → VietOCR vgg_transformer: text tiếng Việt + recognition confidence
+  → raw OCR chung
+  → làm sạch nhãn + chuẩn hóa fields + MRZ + barcode + YuNet
 ```
 
-`pipeline.py` luôn OCR trên `output/document_final.jpg`, không OCR trực tiếp ảnh gốc. `ocr_service.py` khóa inference để bảo vệ việc tái sử dụng model trong process hiện tại.
+`/process` và `/process-batch` OCR ảnh đã tiền xử lý; `/ocr` OCR trực tiếp ảnh upload sau validate/quality gate. Các bước barcode và face crop dùng ảnh độc lập với recognizer chữ. Confidence OCR không phải xác suất được hiệu chuẩn hoặc bằng chứng giấy tờ thật.
 
-## So sánh theo vai trò
+| Thành phần | Triển khai trong code | Đầu ra / giới hạn |
+| --- | --- | --- |
+| Text detector | PaddleX `create_model("PP-OCRv5_server_det", device="cpu", engine="onnxruntime")` | Polygon và điểm detection; không tự nhận dạng nội dung |
+| Text recognizer | VietOCR `Cfg.load_config_from_name("vgg_transformer")`, PyTorch CPU | Chuỗi chữ và confidence của từng dòng; phụ thuộc line crop |
+| Orientation | `PP-LCNet_x1_0_doc_ori` trong bước tiền xử lý | Nhãn xoay 0/90/180/270; không phải text recognizer |
+| Face detector | OpenCV YuNet trong `structured_extraction.py` | Crop khuôn mặt nếu có model và phát hiện được; không nhận dạng danh tính/liveness |
+| Barcode | `zxing-cpp` trong `barcode_service.py` | Raw bytes/text và profile nhận diện được; không giải mọi payload thành thông tin cá nhân |
+| MRZ | `mrz_parser.py` + bằng chứng ảnh `mrz_image.py` | Chuẩn hóa TD1 và định danh theo vị trí; chưa xác thực checksum ICAO |
 
-| Thành phần | Model | Input | Output | Lý do chọn | Giới hạn |
-| --- | --- | --- | --- | --- | --- |
-| Text detection | `PP-OCRv5_server_det` | Ảnh đã tiền xử lý | Polygon 4 điểm, detection confidence | Định vị dòng/vùng chữ và giữ bố cục để chuẩn hóa | Không tự đọc text; polygon sai hoặc thiếu sẽ làm recognizer mất nội dung |
-| Text recognition | `VietOCR vgg_transformer` | Ảnh dòng chữ đã nắn thẳng | Text, recognition confidence | Pretrained hướng tiếng Việt, phù hợp hơn recognizer Latin tổng quát trong các lần kiểm thử của project | Không tự phát hiện text; có thể sai trên ảnh nhỏ, mờ, chói, chữ bị che hoặc số sát nhau |
+Detector OCR còn được dùng trong fallback bố cục chữ của bước crop giấy tờ. Nhánh đó chỉ dùng polygon để suy ra khung; sau tiền xử lý vẫn OCR ảnh cuối. Nó chạy trong process của script crop, tách biệt với worker OCR chính.
 
-## Cách triển khai hiện tại
+## 2. Cache và worker
 
-### PP-OCRv5_server_det
+`ocr_service.py` đặt cache PaddleX tại `ai-engine/model-cache/`. VietOCR lưu config/weights ở `model-cache/vietocr/vgg_transformer.yml` và `vgg_transformer.pth`; khi thiếu, service bootstrap pretrained rồi lưu cache. Mỗi process giữ `_detector`, `_recognizer` và các lock khởi tạo/inference riêng.
 
-Detector được PaddleX khởi tạo với `device="cpu"` và `engine="onnxruntime"`. Mỗi polygon được nới nhẹ, sau đó `cv2.getPerspectiveTransform`/`cv2.warpPerspective` nắn thành một ảnh dòng chữ trước khi gửi sang recognizer. Bước nới biên giúp giảm nguy cơ cắt mất dấu tiếng Việt sát mép polygon.
+FastAPI dùng `ProcessPoolExecutor` cho local OCR; mỗi worker tái sử dụng các model đã nạp qua những yêu cầu tiếp theo. Mặc định một FastAPI process có 2 slot job và 2 worker OCR; cấu hình `AI_MAX_CONCURRENT_JOBS` (1–4), `AI_LOCAL_OCR_WORKERS` (1 đến số job) điều chỉnh giới hạn này. Worker có thể được khởi tạo/nạp model khi nhận việc đầu tiên. Tăng worker có thể tăng lượng RAM và số instance model; không có số đo trong tài liệu bảo đảm tăng tuyến tính tốc độ.
 
-Thông thường detector chạy tại bước OCR chính. Riêng khi `test_document_crop.py` không xác định được giấy tờ bằng các fallback hình học, nhánh OCR text-layout có thể gọi detector sớm để bao vùng chữ và suy ra khung giấy tờ. Sau khi crop hoàn tất, detector vẫn chạy lại trên `document_final.jpg` cho OCR chính; đây là fallback định vị giấy tờ, không phải một recognizer thứ hai.
+Các adapter HTTP chạy qua `asyncio.to_thread`, không qua pool local. Khi chạy `pipeline.py` thủ công, OCR/chuẩn hóa được gọi bằng script con riêng; CLI không dùng pool thường trực của FastAPI. Sáu bước tiền xử lý cũng có process riêng, nên không thể nói mọi model trong toàn pipeline đều chỉ nạp một lần.
 
-### VietOCR vgg_transformer
+## 3. Bốn provider đã được triển khai
 
-Recognizer dùng cấu hình `vgg_transformer`, chạy CPU qua PyTorch. Lần đầu thiếu cache, service khởi tạo model pretrained rồi lưu config/weight vào `ai-engine/model-cache/vietocr/`; các lần sau tái sử dụng cache và instance đã nạp trong process.
+| Provider | Cách gọi thực tế | Cấu hình trong môi trường Uvicorn |
+| --- | --- | --- |
+| `local_hybrid` | PP-OCRv5 + VietOCR trên CPU | Cache/model và dependency local |
+| `fpt_ai_reader` | POST multipart `image`, header `api_key`; chuyển response trường dữ liệu FPT về schema nội bộ | `FPT_AI_READER_API_KEY`, `FPT_AI_READER_DOCUMENT_TYPE`, URL tùy chọn, timeout |
+| `vnpt_ekyc` | Kế thừa adapter HTTP generic: multipart `file`, Bearer token tùy chọn | `VNPT_EKYC_OCR_URL`, `VNPT_EKYC_OCR_API_KEY`, timeout; endpoint/gateway phải trả schema nội bộ |
+| `external_ekyc` | POST multipart `file`, Bearer token tùy chọn | `EKYC_OCR_URL`, `EKYC_OCR_API_KEY`, timeout; endpoint phải trả schema nội bộ |
 
-## Dữ liệu trả về
+Nhánh `vnpt_ekyc` hiện chưa triển khai đầy đủ một workflow native VNPT gồm upload/hash/liveness/đối chiếu khuôn mặt. Tên provider này không có nghĩa hệ thống đã tích hợp mọi API eKYC của VNPT.
 
-Raw OCR gồm `full_text` và từng dòng: `text`, `confidence`, `detection_confidence`, `polygon`. `structured_extraction.py` dùng các dòng này để:
+### FPT.AI Reader
 
-- Nhận diện CCCD, giấy phép lái xe hoặc giấy chứng nhận đăng ký xe từ tiêu đề/nhãn.
-- Ghép nhãn với giá trị cùng hàng, bên phải hoặc ở hàng tiếp theo theo polygon.
-- Ghép địa chỉ nhiều dòng trong vùng bố cục phù hợp.
-- Chuẩn hóa bảo thủ số, ngày và một số nhiễu ký tự; vẫn giữ `raw_value`, `source_line_indexes` và `unmapped_raw_lines` để truy vết.
-- Dùng YuNet độc lập với OCR để crop khuôn mặt khi phát hiện được.
+`FPT_AI_READER_DOCUMENT_TYPE` hỗ trợ `id_card` và `driver_license`. Giá trị này cấu hình cho adapter, không được tự phân loại cho từng ảnh. URL mặc định trong source:
 
-Kết quả OCR/chuẩn hóa cần được khách hàng đối chiếu và có thể chỉnh sửa trước khi gửi hồ sơ để nhân viên xác thực.
+- `id_card`: `https://api.fpt.ai/vision/idr/vnm/`.
+- `driver_license`: `https://api.fpt.ai/vision/dlr/vnm`.
 
-## Phụ lục khảo sát các lựa chọn OCR khác
+`FPT_AI_READER_URL` có thể ghi đè. Adapter yêu cầu `errorCode == 0`, lấy object đầu tiên trong `data`, bỏ giá trị trống/N/A/null, chuyển các field được liệt kê trong `field_labels()` thành dòng `nhãn: giá trị`. Điểm field lấy từ `<key>_prob` nếu chuyển được sang float.
 
-Phần phụ lục này được bổ sung để so sánh với tổ hợp đang chạy; không thay đổi lựa chọn hoặc luồng triển khai ở các phần phía trên. Đây là khảo sát theo tài liệu của nhà phát hành và kiến trúc model, **không phải** kết quả benchmark trên bộ ảnh giấy tờ của project. Không model nào trong bảng dưới được cài thêm hoặc được gọi bởi `ocr_service.py`.
+**Polygon của nhánh FPT là polygon tổng hợp để tương thích schema**, không phải tọa độ detection trên ảnh gốc. `detection_confidence` là null. Không dùng các tọa độ này để đánh giá chất lượng định vị hay coi chúng là bằng chứng bố cục thật. Nhánh này không trả mọi field vendor có thể cung cấp: source hiện chỉ ánh xạ nhóm số, họ tên, ngày sinh, quốc tịch, địa chỉ, giới tính/quê quán hoặc hạng bằng và hạn sử dụng tùy loại.
 
-### Phạm vi so sánh
+### VNPT/generic
 
-OCR của project là kiến trúc hai giai đoạn: detector cần trả polygon để giữ bố cục cho `structured_extraction.py`, còn recognizer cần đọc tốt tiếng Việt có dấu. Vì vậy không đánh giá một recognizer đơn lẻ như một phương án thay thế hoàn chỉnh nếu nó không có detector đi kèm.
+Gateway phải trả object có các khóa `status`, `engine`, `line_count`, `full_text`, `lines`; `lines` phải là list. `validate_ocr_result()` hiện chỉ kiểm tra các khóa bắt buộc và kiểu list, không kiểm tra sâu toàn bộ polygon/field. Nhánh VNPT bổ sung `engine.provider = "VNPT eKYC"` nếu engine là dict và chưa có provider.
 
-| Phương án | Phạm vi | Điểm mạnh khi đối chiếu với hệ thống hiện tại | Hạn chế/rủi ro cho project |
-| --- | --- | --- | --- |
-| **Hiện tại: PP-OCRv5 detector + VietOCR vgg_transformer** | Detector và recognizer tách rời | Detector trả polygon 4 điểm; VietOCR pretrained cho tiếng Việt, nên phù hợp mục tiêu giữ dấu tiếng Việt và ghép dữ liệu theo vị trí | Hai runtime PaddleX/ONNX Runtime và PyTorch; tốc độ CPU phụ thuộc số dòng text; vẫn có thể sai khi ảnh mờ, chói hoặc bị che |
-| **PP-OCRv5 detector + PP-OCRv5 recognizer** | Hai giai đoạn PaddleOCR | Cùng hệ sinh thái, dễ cấu hình end-to-end và có các recognizer multilingual/Latin chính thức | Danh sách ngôn ngữ của recognizer PP-OCRv5 được khảo sát không liệt kê tiếng Việt; không thay VietOCR nếu chưa có benchmark tiếng Việt có dấu hoặc checkpoint/finetune phù hợp |
-| **EasyOCR** | End-to-end: detector CRAFT/DBNet và recognizer | Có hỗ trợ mã ngôn ngữ `vi`; một thư viện có thể chạy cả detection và recognition, thuận tiện dựng baseline | Dùng recognizer Latin dùng chung nhiều ngôn ngữ; cần kiểm chứng riêng độ chính xác dấu tiếng Việt, polygon/layout và hiệu năng CPU trước khi thay pipeline hiện tại |
-| **Tesseract 5 với `vie.traineddata`** | OCR engine kèm page segmentation | Có language data tiếng Việt chính thức, nhẹ và quen thuộc khi chạy CPU; thích hợp baseline/offline đơn giản | Đầu ra mặc định thiên về text/box theo page segmentation, không thay trực tiếp detector polygon hiện tại; cần tự xử lý phân đoạn, góc nghiêng và ghép layout nhiều dòng |
-| **docTR** | Framework ghép detector và recognizer, ví dụ DBNet + CRNN/PARSeq | Hỗ trợ tách hoặc ghép hai giai đoạn, detector có hỗ trợ tài liệu nghiêng; thuận lợi nếu sau này cần thử nhiều kiến trúc trong cùng framework | Model pretrained mặc định/vocabulary không được chọn riêng cho tiếng Việt trong project; cần chuẩn bị vocabulary/checkpoint tiếng Việt và benchmark trước khi tích hợp |
-| **TrOCR** | Recognizer Transformer VisionEncoderDecoder | Kiến trúc Transformer mạnh cho nhận dạng ảnh dòng chữ; phù hợp để thử nghiệm/finetune recognizer khi đã có line crop | Không có detector trong model này; checkpoint phổ biến không mặc định bảo đảm tiếng Việt. Cần detector hiện tại và dữ liệu gán nhãn tiếng Việt để đánh giá hoặc finetune |
+## 4. Chọn provider cho từng request
 
-### Phân tích theo từng lựa chọn
+1. Admin lưu lựa chọn tại `/admin/ocr-vendor`; Laravel cập nhật `system_settings`, audit và file state dùng chung.
+2. Request Laravel lấy lựa chọn từ database hợp lệ hoặc config mặc định, rồi gửi `X-OCR-Provider` cho AI Engine.
+3. Nếu gọi FastAPI không có header, engine đọc `AI_OCR_PROVIDER_STATE_PATH` (mặc định `storage/app/private/ocr-provider.json`), rồi fallback `OCR_PROVIDER` nếu file không có lựa chọn hợp lệ.
+4. Một request batch chốt cùng provider cho các ảnh trong request đó. Không gộp output của nhiều vendor và không tự fallback khi vendor lỗi.
 
-#### PP-OCRv5 recognition
+Thay lựa chọn trong Admin áp dụng cho yêu cầu mới mà không restart. Credentials, endpoint và timeout không được nhập ở giao diện Admin; chúng thuộc môi trường Uvicorn và thay đổi môi trường cần restart process. `GET /metrics` hoặc `/metric` phản ánh lựa chọn state/environment ở lần gọi hiện tại, không chứng minh credential hợp lệ hoặc cho biết provider override của một request đã qua.
 
-PaddleOCR cung cấp recognizer PP-OCRv5 cho nhiều ngôn ngữ, đồng thời detector PP-OCRv5 đang chạy của project đã tương thích với cùng hệ sinh thái. Đây là phương án có chi phí thay đổi kiến trúc thấp nhất. Tuy nhiên, tài liệu PP-OCRv5 multilingual được khảo sát liệt kê các model Latin và một số nhóm ngôn ngữ khác, nhưng không liệt kê tiếng Việt. Vì yêu cầu chính của project là giữ dấu tiếng Việt, PP-OCRv5 recognition chỉ phù hợp làm ứng viên benchmark dự phòng, không thay thế VietOCR mặc định khi chưa đo trên dữ liệu thực.
+## 5. Schema OCR và chuẩn hóa
 
-#### EasyOCR
+Raw OCR có `status`, `engine`, `line_count`, `full_text`, `lines`. Nhánh local trả mỗi dòng gồm `index`, `text`, `confidence`, `detection_confidence`, `polygon`. Structured OCR bổ sung loại giấy tờ/phiên bản CCCD, `fields`, MRZ, barcode, dấu vết làm sạch, thông tin verification, face crop, toàn bộ dòng và dòng chưa gán.
 
-EasyOCR cung cấp detector CRAFT hoặc DBNet và recognizer trong một API; danh sách language của recognizer Latin thế hệ 2 có `vi`. Điểm thuận tiện là có thể tạo baseline end-to-end nhanh. Điểm đánh đổi là model Latin phục vụ nhiều ngôn ngữ và project sẽ phải kiểm tra lại độ chính xác của dấu, số định danh, chuỗi biển số và polygon theo góc nghiêng trước khi dùng cho chuẩn hóa dữ liệu.
+Các field giữ `raw_value`, `normalized_value`, confidence và nguồn dòng khi có. Schema CCCD còn materialize trường không đọc được với `extraction_status=not_detected`. Dữ liệu ghép hai mặt có thêm nguồn `front/back`; barcode bổ sung trường trống với `source_type=barcode` sau khi đối chiếu hợp lệ. Customer có thể sửa field được phép trước khi gửi duyệt; thao tác đó có dấu `manually_edited`, không thay kết quả raw OCR.
 
-#### Tesseract 5
+Face crop chỉ có khi tìm thấy model tại đường dẫn `model-cache/face-detection/face_detection_yunet_2026may.onnx` và phát hiện được mặt. Nếu thiếu model, trả `model_not_available`; nếu không thấy mặt, trả `not_detected`. Đây không phải lỗi OCR và response ảnh mặt là null.
 
-Tesseract có language data `vie.traineddata` chính thức và có thể chạy LSTM engine trên CPU. Đây là lựa chọn hữu ích để tạo baseline chi phí thấp cho ảnh giấy tờ đã crop phẳng, đặc biệt khi cần so sánh text thuần. Tuy nhiên, project cần polygon bốn điểm cho từng dòng để ghép field và địa chỉ nhiều dòng; vì thế Tesseract không phải thay thế trực tiếp cho PP-OCRv5 detector nếu không bổ sung tầng layout/detection riêng.
+## 6. Phạm vi đánh giá hiện có
 
-#### docTR
+Các test trong repo kiểm tra cache/model lifecycle, lựa chọn provider, hợp đồng adapter, làm sạch văn bản, trích xuất theo bố cục, MRZ/barcode và điều kiện ghép mặt. Một số file tên `test_*.py` là **script pipeline chạy thật**, không phải test unittest; không dùng lệnh discover toàn bộ mà chưa phân biệt hai nhóm.
 
-docTR cung cấp `ocr_predictor` gồm detector và recognizer có thể hoán đổi; tài liệu của docTR cho biết detector hỗ trợ tài liệu xoay/nghiêng. Đây là lợi thế khi nghiên cứu nhiều tổ hợp như DBNet + PARSeq. Dù vậy, checkpoint và vocabulary phải được kiểm tra cho tiếng Việt, nên rủi ro triển khai cao hơn việc giữ detector hiện tại và recognizer VietOCR.
+Project có công cụ xuất kết quả theo ảnh/batch (`export_structured_ocr_batch.py`, `export_cccd_pair_ocr.py`, `export_cccd_pair_batch.py`). Kết quả phụ thuộc ảnh đầu vào và model/cache/config của lần chạy. Những công cụ này không tự cung cấp bảng ground truth, CER/WER hoặc bằng chứng một model tốt hơn mọi phương án khác.
 
-#### TrOCR
+Chưa có bảng benchmark đã kiểm chứng chung cho mọi provider. Chưa thể so sánh confidence local với confidence vendor như cùng một thang độ chính xác. Payload PDF417 nhị phân của ảnh CCCD 2016 đã đọc được ở lớp barcode nhưng parser định danh chưa hỗ trợ; không tính nó là một trường hợp trích xuất thông tin cá nhân thành công.
 
-TrOCR là recognizer Transformer dạng VisionEncoderDecoder, nhận ảnh text crop và sinh chuỗi ký tự; nó không thực hiện text detection. Vì vậy TrOCR chỉ có thể được thử ở đúng vị trí của VietOCR sau `perspective_warp_line()`, không thể thay cả pipeline. Nó chỉ đáng cân nhắc khi project có tập dữ liệu dòng chữ tiếng Việt đã gán nhãn để benchmark hoặc finetune.
+## 7. Các phương án khảo sát chưa tích hợp
 
-### Kết luận khảo sát
+EasyOCR, Tesseract, docTR, TrOCR và việc thay VietOCR bằng recognizer PP-OCRv5 chưa có nhánh provider trong code hiện tại. Khảo sát các phương án này là hướng nghiên cứu, không phải chức năng đã triển khai hay kết luận benchmark. Nếu đánh giá sau này, cần dùng cùng tập ảnh/ground truth và ghi riêng độ chính xác ký tự, trường định danh, bố cục và thời gian xử lý.
 
-Tổ hợp hiện tại vẫn là lựa chọn phù hợp nhất cho yêu cầu hiện tại: **PP-OCRv5_server_det** giữ polygon/bố cục, còn **VietOCR vgg_transformer** ưu tiên recognition tiếng Việt. Nếu cần khảo sát thực nghiệm tiếp theo, thứ tự hợp lý là:
+Các liên kết tham khảo đã có trong tài liệu khảo sát:
 
-1. Dùng **Tesseract `vie`** làm baseline text trên cùng các line crop.
-2. Dùng **EasyOCR `vi`** làm baseline end-to-end để so sánh detection + recognition.
-3. Chỉ thử PP-OCRv5 recognition, docTR hoặc TrOCR sau khi có bộ benchmark chứa ảnh CCCD, GPLX và đăng ký xe với ground truth tiếng Việt; đánh giá riêng CER/WER, tỷ lệ giữ dấu, tỷ lệ đọc đúng số/biển số và độ chính xác polygon.
+- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
+- [VietOCR](https://github.com/pbcquoc/vietocr)
+- [EasyOCR](https://github.com/JaidedAI/EasyOCR)
+- [Tesseract](https://github.com/tesseract-ocr/tesseract)
+- [docTR](https://github.com/mindee/doctr)
+- [TrOCR](https://huggingface.co/docs/transformers/model_doc/trocr)
 
-Việc thay model chỉ nên được quyết định sau benchmark trên cùng ảnh đầu vào và cùng bước tiền xử lý; không suy luận model tốt hơn chỉ từ confidence hoặc kết quả của một vài ảnh.
-
-### Nguồn tham khảo khảo sát
-
-- [PaddleOCR: PP-OCRv5 multilingual recognition](https://paddlepaddle.github.io/PaddleOCR/latest/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5_multi_languages.html)
-- [VietOCR repository](https://github.com/pbcquoc/vietocr)
-- [EasyOCR repository](https://github.com/JaidedAI/EasyOCR)
-- [Tesseract language data](https://tesseract-ocr.github.io/tessdoc/Data-Files.html)
-- [docTR model guide](https://mindee.github.io/doctr/using_doctr/using_models.html)
-- [Hugging Face TrOCR documentation](https://huggingface.co/docs/transformers/model_doc/trocr)
+Các nguồn trên dùng để tìm tài liệu của từng công cụ; phần mô tả runtime của hệ thống trong tài liệu này được đối chiếu từ source local, không xác nhận lại khả năng hay phiên bản mới nhất của các công cụ khảo sát.

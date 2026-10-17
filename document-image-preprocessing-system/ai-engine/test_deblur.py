@@ -3,11 +3,9 @@ import numpy as np
 import os
 
 
-INPUT_IMAGE = "output/document_deglare.jpg"
-
-OUTPUT_DIR = "output"
-
-OUTPUT_IMAGE = f"{OUTPUT_DIR}/document_deblur.jpg"
+OUTPUT_DIR = os.getenv("PIPELINE_OUTPUT_DIR", "output")
+INPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_deglare.jpg")
+OUTPUT_IMAGE = os.path.join(OUTPUT_DIR, "document_deblur.jpg")
 
 
 # =========================================================

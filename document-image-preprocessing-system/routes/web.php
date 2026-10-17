@@ -47,5 +47,8 @@ Route::middleware(['auth', 'active'])->group(function (): void {
         Route::get('/users', [AdminController::class, 'users'])->name('users');
         Route::put('/users/{user}/access', [AdminController::class, 'updateAccess'])->name('users.access');
         Route::get('/audit-logs', [AdminController::class, 'auditLogs'])->name('audit-logs');
+        Route::get('/processing-metrics', [AdminController::class, 'processingMetrics'])->name('processing-metrics');
+        Route::get('/ocr-vendor', [AdminController::class, 'ocrVendor'])->name('ocr-vendor');
+        Route::put('/ocr-vendor', [AdminController::class, 'updateOcrVendor'])->name('ocr-vendor.update');
     });
 });

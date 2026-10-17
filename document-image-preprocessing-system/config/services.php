@@ -37,8 +37,17 @@ return [
 
     'ai_engine' => [
         'url' => env('AI_ENGINE_URL', 'http://127.0.0.1:8000'),
+        'default_ocr_provider' => env('OCR_PROVIDER', 'local_hybrid'),
+        'ocr_provider_state_path' => env('AI_OCR_PROVIDER_STATE_PATH', storage_path('app/private/ocr-provider.json')),
         'connect_timeout' => env('AI_ENGINE_CONNECT_TIMEOUT', 5),
         'timeout' => env('AI_ENGINE_TIMEOUT', 360),
+        'batch_timeout' => env('AI_ENGINE_BATCH_TIMEOUT', 600),
+        'retry_attempts' => env('AI_ENGINE_RETRY_ATTEMPTS', 3),
+        'retry_delay_milliseconds' => env('AI_ENGINE_RETRY_DELAY_MILLISECONDS', 500),
+        'alert_window_minutes' => env('AI_ENGINE_ALERT_WINDOW_MINUTES', 15),
+        'alert_minimum_requests' => env('AI_ENGINE_ALERT_MINIMUM_REQUESTS', 5),
+        'alert_failure_ratio' => env('AI_ENGINE_ALERT_FAILURE_RATIO', 0.4),
+        'alert_cooldown_minutes' => env('AI_ENGINE_ALERT_COOLDOWN_MINUTES', 15),
     ],
 
 ];

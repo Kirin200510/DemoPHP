@@ -7,7 +7,7 @@ from ocr_service import extract_raw_ocr
 
 
 BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR = Path(os.environ.get("PIPELINE_OUTPUT_DIR", BASE_DIR / "output"))
 
 
 def main() -> None:

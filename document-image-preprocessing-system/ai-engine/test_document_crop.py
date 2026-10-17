@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 from pathlib import Path
@@ -7,15 +9,15 @@ from pathlib import Path
 # CONFIG
 # =========================================================
 
-OUTPUT_DIR = "output"
+OUTPUT_DIR = Path(os.environ.get("PIPELINE_OUTPUT_DIR", "output"))
 
 # Crop phải chạy trước UVDoc. UVDoc có thể tự thay đổi/cắt sát mép ảnh, làm
 # mất chính các góc mà bước này cần để xác định giấy tờ.
-INPUT_IMAGE = f"{OUTPUT_DIR}/orientation_corrected.jpg"
+INPUT_IMAGE = str(OUTPUT_DIR / "orientation_corrected.jpg")
 
-DETECTION_PREVIEW = f"{OUTPUT_DIR}/document_detection.jpg"
-DOCUMENT_MASK = f"{OUTPUT_DIR}/document_mask.jpg"
-DOCUMENT_CROP = f"{OUTPUT_DIR}/document_crop.jpg"
+DETECTION_PREVIEW = str(OUTPUT_DIR / "document_detection.jpg")
+DOCUMENT_MASK = str(OUTPUT_DIR / "document_mask.jpg")
+DOCUMENT_CROP = str(OUTPUT_DIR / "document_crop.jpg")
 
 
 # Tỷ lệ hình chữ nhật gần giống CCCD
@@ -2392,6 +2394,81 @@ def is_partial_border_strip(
     )
 
 
+def is_incomplete_full_frame_candidate(
+    points,
+    image_shape,
+):
+    """Reject an inner text rectangle when the input itself is a card frame.
+
+    A new CCCD can have strong horizontal text edges. On a tightly framed
+    photograph those edges may form a valid 4-point quadrilateral with the
+    right aspect ratio, even though its bottom edge is inside the real card.
+    If the input aspect ratio is already card-like and the candidate spans
+    most of the width but only the upper part of the height, preserve the
+    complete input frame instead of cropping away the lower fields/photo.
+    """
+
+    image_height, image_width = image_shape[:2]
+
+    if image_height <= 0 or image_width <= 0:
+        return False
+
+    frame_ratio = image_width / image_height
+
+    if not DOCUMENT_RATIO_MIN <= frame_ratio <= DOCUMENT_RATIO_MAX:
+        return False
+
+    ordered = order_points(points)
+    x, y, width, height = cv2.boundingRect(ordered)
+    candidate_area = cv2.contourArea(
+        ordered.reshape(-1, 1, 2),
+    )
+    image_area = image_width * image_height
+
+    return (
+        candidate_area / image_area < 0.68
+        and width >= image_width * 0.68
+        and height <= image_height * 0.78
+        and y <= image_height * 0.18
+    )
+
+
+def should_use_safe_full_frame_for_conflicting_candidates(
+    original_points,
+    fallback_points,
+    image_shape,
+):
+    """Keep the complete input when a fallback would discard most of it.
+
+    Edge and colour detectors can return a broad, document-like frame while a
+    later Hough-line fallback accidentally closes on an inner rectangle made by
+    text rows or a photo boundary. There is no reliable evidence that the
+    smaller candidate contains every document field, so retain the full input
+    frame whenever the two candidates disagree substantially.
+    """
+
+    if original_points is None or fallback_points is None:
+        return False
+
+    image_height, image_width = image_shape[:2]
+    image_area = image_width * image_height
+
+    if image_area <= 0:
+        return False
+
+    original_area_ratio = cv2.contourArea(
+        order_points(original_points).reshape(-1, 1, 2),
+    ) / image_area
+    fallback_area_ratio = cv2.contourArea(
+        order_points(fallback_points).reshape(-1, 1, 2),
+    ) / image_area
+
+    return (
+        original_area_ratio >= 0.70
+        and fallback_area_ratio < original_area_ratio * 0.70
+    )
+
+
 def extends_outside_image(
     points,
     image_shape,
@@ -2844,6 +2921,24 @@ if (
     used_safe_full_frame = True
 
 
+if (
+    points is not None
+    and not used_safe_full_frame
+    and is_incomplete_full_frame_candidate(
+        points,
+        detection_image.shape,
+    )
+):
+    print()
+    print(
+        "Rejected an inner text rectangle; "
+        "using the complete document-like input frame."
+    )
+    points = full_image_points(detection_image.shape)
+    crop_padding_ratio = 0.0
+    used_safe_full_frame = True
+
+
 # =========================================================
 # METHOD 7: OCCLUDED EDGE / PERSPECTIVE FALLBACK
 # =========================================================
@@ -2895,6 +2990,7 @@ if points is not None and not used_safe_full_frame:
 
 
 if fallback_is_suspicious:
+    original_points_before_geometric_fallback = points
     occluded_points, occluded_mask = find_document_by_coarse_hsv_bbox(
         detection_image
     )
@@ -2949,9 +3045,22 @@ if fallback_is_suspicious:
                 selected_mask = perspective_edges
 
         if selected_points is not None:
-            points = selected_points
-            debug_mask = selected_mask
-            crop_padding_ratio = 0.10
+            if should_use_safe_full_frame_for_conflicting_candidates(
+                original_points_before_geometric_fallback,
+                selected_points,
+                detection_image.shape,
+            ):
+                print(
+                    "Rejected a substantially smaller geometric fallback; "
+                    "using the complete input frame."
+                )
+                points = full_image_points(detection_image.shape)
+                crop_padding_ratio = 0.0
+                used_safe_full_frame = True
+            else:
+                points = selected_points
+                debug_mask = selected_mask
+                crop_padding_ratio = 0.10
 
 
 # =========================================================
@@ -3021,6 +3130,22 @@ if (
         detection_image.shape
     )
 
+    crop_padding_ratio = 0.0
+
+
+if (
+    points is not None
+    and is_incomplete_full_frame_candidate(
+        points,
+        detection_image.shape,
+    )
+):
+    print()
+    print(
+        "Rejected a final inner text rectangle; "
+        "using the complete document-like input frame."
+    )
+    points = full_image_points(detection_image.shape)
     crop_padding_ratio = 0.0
 
 

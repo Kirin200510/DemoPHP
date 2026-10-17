@@ -7,7 +7,7 @@ from structured_extraction import build_structured_result
 
 
 BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR = Path(os.environ.get("PIPELINE_OUTPUT_DIR", BASE_DIR / "output"))
 
 
 def main() -> None:

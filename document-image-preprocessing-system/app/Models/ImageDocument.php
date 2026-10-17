@@ -6,6 +6,7 @@ use Database\Factories\ImageDocumentFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ImageDocument extends Model
 {
@@ -27,13 +28,17 @@ class ImageDocument extends Model
     protected $fillable = [
         'original_path',
         'user_id',
+        'merged_into_document_id',
         'processed_path',
+        'storage_encrypted',
         'ocr_raw_data',
         'ocr_structured_data',
         'status',
         'reviewed_by',
         'reviewed_at',
         'review_notes',
+        'expires_at',
+        'purged_at',
     ];
 
     /**
@@ -53,6 +58,26 @@ class ImageDocument extends Model
     }
 
     /**
+     * Return the canonical dossier that owns this side of a matched document.
+     *
+     * @return BelongsTo<ImageDocument, $this>
+     */
+    public function mergedIntoDocument(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'merged_into_document_id');
+    }
+
+    /**
+     * Return document sides retained under this canonical dossier.
+     *
+     * @return HasMany<ImageDocument, $this>
+     */
+    public function mergedDocumentSides(): HasMany
+    {
+        return $this->hasMany(self::class, 'merged_into_document_id');
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
@@ -61,6 +86,9 @@ class ImageDocument extends Model
             'ocr_raw_data' => 'array',
             'ocr_structured_data' => 'array',
             'reviewed_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'purged_at' => 'datetime',
+            'storage_encrypted' => 'boolean',
         ];
     }
 }

@@ -123,6 +123,23 @@ class ResidenceLayoutExtractionTest(unittest.TestCase):
         )
         self.assertEqual(fields["registration_plate"]["normalized_value"], "29A-123.45")
 
+    def test_keeps_a_right_aligned_value_when_perspective_shifts_it_above_label(self):
+        lines = [
+            ocr_line(0, "Thôn Sơn Hải 2", 334, 46, 210),
+            ocr_line(1, "Nơi cư trú/Place of residence", 22, 65, 300),
+            ocr_line(2, "Phước Dinh, Khánh Hòa", 17, 91, 330),
+        ]
+
+        fields = extract_fields(
+            lines,
+            {"document_type": "citizen_identity_card"},
+        )
+
+        self.assertEqual(
+            fields["residence"]["normalized_value"],
+            "Thôn Sơn Hải 2 Phước Dinh, Khánh Hòa",
+        )
+
     def test_keeps_owner_name_below_its_label_and_removes_address_noise(self):
         lines = [
             ocr_line(0, "Tên chủ xe/Owner's full name:", 30, 40, 440),

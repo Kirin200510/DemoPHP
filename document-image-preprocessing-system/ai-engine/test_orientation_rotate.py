@@ -7,7 +7,8 @@ INPUT_IMAGE = os.getenv(
     "PIPELINE_INPUT",
     "input/cccd_1.jpg"
 )
-OUTPUT_IMAGE = "output/orientation_corrected.jpg"
+OUTPUT_DIR = os.getenv("PIPELINE_OUTPUT_DIR", "output")
+OUTPUT_IMAGE = os.path.join(OUTPUT_DIR, "orientation_corrected.jpg")
 
 
 def rotate_to_upright(image, label):

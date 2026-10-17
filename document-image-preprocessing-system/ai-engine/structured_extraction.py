@@ -1,11 +1,22 @@
+import copy
 import re
 import unicodedata
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
+
+from mrz_parser import parse_mrz
+from barcode_service import decode_document_barcodes
+from document_pairing import identity_barcodes
+
+from ocr_labels import (
+    FIELD_LABELS,
+    CANONICAL_FIELD_LABELS,
+    clean_ocr_lines,
+    find_label_matches,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -16,53 +27,6 @@ FACE_DETECTOR_MODEL = (
     / "face_detection_yunet_2026may.onnx"
 )
 
-FIELD_LABELS = {
-    "full_name": ("ho ten", "ho va ten", "full name"),
-    "date_of_birth": ("ngay sinh", "date of birth"),
-    "sex": ("gioi tinh", "sex"),
-    "nationality": ("quoc tich", "nationality"),
-    "place_of_origin": ("que quan", "place of origin"),
-    "residence": (
-        "noi thuong tru",
-        "noi thuong tru/",
-        "noi cu tru",
-        "place of residence",
-    ),
-    "document_number": (
-        "so/no",
-        "so no",
-        "so i no",
-        "so i/no",
-        "so ino",
-        "so cccd",
-        "id no",
-    ),
-    "license_class": ("hang/class", "hang class", "class:"),
-    "expiry_date": ("co gia tri den", "expires", "expiry date"),
-    "owner_name": (
-        "ten chu xe",
-        "owner's full name",
-        "owner s full name",
-        "owners full name",
-    ),
-    "vehicle_address": ("dia chi", "address"),
-    "brand": ("nhan hieu", "brand"),
-    "model_code": ("so loai", "model code"),
-    "engine_number": ("so may", "engine no", "engine number"),
-    "chassis_number": ("so khung", "chassis no", "chassis number"),
-    "paint_color": ("mau son", "color"),
-    "operating_scope": ("hoat dong trong pham vi", "operating scope"),
-    "registration_plate": (
-        "bien so dang ky",
-        "no plate",
-        "n° plate",
-        "number plate",
-    ),
-    "seating_capacity": ("so cho ngoi", "seating capacity", "number of seats"),
-    "engine_power": ("cong suat", "power"),
-    "vehicle_type": ("loai xe", "vehicle type"),
-    "engine_displacement": ("dung tich", "displacement", "cylinder capacity"),
-}
 VERIFICATION_KEYWORDS = {
     "issuer": ("bo giao thong", "so giao thong", "cong an", "bo gtvt"),
     "signer_title": ("giam doc", "pho giam doc", "truong phong"),
@@ -70,7 +34,11 @@ VERIFICATION_KEYWORDS = {
 }
 DOCUMENT_TITLE_PATTERNS = {
     "driver_license": ("giay phep lai", "driver's license", "drivers license"),
-    "citizen_identity_card": ("can cuoc cong dan", "citizen identity"),
+    "citizen_identity_card": (
+        "can cuoc cong dan",
+        "can cuoc",
+        "citizen identity",
+    ),
     "vehicle_registration": (
         "giay chung nhan dang ky xe",
         "dang ky xe",
@@ -82,6 +50,21 @@ DOCUMENT_TYPE_LABELS = {
     "driver_license": "Giấy phép lái xe / Driver's License",
     "citizen_identity_card": "Căn cước công dân / Citizen Identity Card",
     "vehicle_registration": "Giấy chứng nhận đăng ký xe / Vehicle Registration",
+}
+CCCD_FIXED_FIELD_LABELS = {
+    "personal_identification_number": "Số định danh cá nhân/Personal identification number",
+    "full_name": "Họ, chữ đệm và tên khai sinh/Full name",
+    "date_of_birth": "Ngày, tháng, năm sinh/Date of birth",
+    "sex": "Giới tính/Sex",
+    "nationality": "Quốc tịch/Nationality",
+    "residence": "Nơi cư trú/Place of residence",
+    "place_of_birth": "Nơi đăng ký khai sinh/Place of birth",
+    "issue_date": "Ngày, tháng, năm cấp/Date of issue",
+    "expiry_date": "Ngày, tháng, năm hết hạn/Date of expiry",
+    "cccd_number": "Số/No",
+    "place_of_origin": "Quê quán/Place of origin",
+    "personal_identification": "Đặc điểm nhân dạng/Personal identification",
+    "date_month_year": "Ngày, tháng, năm/Date, month, year",
 }
 NON_FIELD_ANNOTATIONS = (
     "mau minh hoa",
@@ -168,47 +151,62 @@ def median_line_height(lines: list[dict[str, Any]]) -> float:
 
 
 def is_field_label_line(text: str) -> bool:
-    """Cho biết dòng có nhãn field khác, là điểm dừng khi ghép địa chỉ."""
+    """Use the same label resolver for extraction and layout boundaries."""
 
-    text_key = searchable_text(text)
-
-    return any(
-        searchable_text(label) in text_key
-        for labels in FIELD_LABELS.values()
-        for label in labels
-    )
+    return bool(find_label_matches(text))
 
 
 def has_field_label(text: str, labels: tuple[str, ...]) -> bool:
-    """So khớp nhãn sau khi bỏ dấu và chuẩn hóa các ký tự phân cách."""
+    """Resolve labels centrally so similar fields cannot claim the same span."""
 
-    text_key = searchable_text(text)
+    expected_fields = {field for field, aliases in FIELD_LABELS.items() if aliases == labels}
+    return any(match.field in expected_fields for match in find_label_matches(text))
 
-    for label in labels:
-        label_key = searchable_text(label)
 
-        if label_key in text_key:
-            return True
+def has_expected_field_semantics(field_name: str, text: str) -> bool:
+    """The shared resolver prefers specific labels over overlapping generic ones."""
 
-        label_word_count = len(label_key.split())
+    return has_field_label(text, FIELD_LABELS[field_name])
 
-        if len(label_key) < 7 or label_word_count < 2:
-            continue
 
-        text_words = text_key.split()
-        similarity_threshold = 0.86 if len(label_key) >= 10 else 0.85
+def is_valid_field_value(field_name: str, value: str) -> bool:
+    """Reject values whose shape cannot represent the selected field."""
 
-        for start in range(len(text_words)):
-            for length in range(
-                max(1, label_word_count - 1),
-                min(len(text_words) - start, label_word_count + 1) + 1,
-            ):
-                candidate = " ".join(text_words[start : start + length])
+    normalized_value = normalize_text(value)
+    value_key = searchable_text(normalized_value)
 
-                if SequenceMatcher(None, label_key, candidate).ratio() >= similarity_threshold:
-                    return True
+    if not normalized_value or is_non_field_annotation(normalized_value):
+        return False
 
-    return False
+    if field_name in {"date_of_birth", "issue_date", "expiry_date", "date_month_year"}:
+        return re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", normalized_value) is not None
+
+    if field_name in {"cccd_number", "personal_identification_number"}:
+        return re.fullmatch(r"\d{12}", normalized_value) is not None
+
+    if field_name == "document_number":
+        return re.fullmatch(r"\d{6,}", normalized_value) is not None
+
+    if field_name == "sex":
+        return value_key in {"nam", "nu", "male", "female"}
+
+    if field_name in {"full_name", "owner_name"}:
+        return is_name_like(normalized_value)
+
+    if field_name == "nationality":
+        return any(character.isalpha() for character in normalized_value) and not bool(
+            re.search(r"\d", normalized_value)
+        )
+
+    if field_name in {
+        "place_of_origin",
+        "place_of_birth",
+        "residence",
+        "vehicle_address",
+    }:
+        return re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", normalized_value) is None
+
+    return True
 
 
 def is_residence_stop_line(text: str) -> bool:
@@ -236,9 +234,15 @@ def same_row_value_line(
     lines: list[dict[str, Any]],
     label_position: int,
 ) -> dict[str, Any] | None:
-    """Tìm vùng text gần nhất ở bên phải của nhãn trên cùng một hàng."""
+    """Tìm vùng text gần nhất bên phải nhãn, có dung sai theo cỡ chữ.
+
+    Ảnh chụp thẻ bị nghiêng thường làm polygon của giá trị cao/thấp hơn
+    polygon của nhãn vài pixel. Ngưỡng cố định dễ làm rơi mất một phần địa
+    chỉ; dùng chiều cao dòng trung vị giữ được tính thích nghi theo ảnh.
+    """
 
     label_x, label_y = line_center(lines[label_position])
+    row_tolerance = max(10.0, median_line_height(lines) * 0.8)
     candidates = []
 
     for position, candidate in enumerate(lines):
@@ -253,7 +257,7 @@ def same_row_value_line(
 
         candidate_x, candidate_y = line_center(candidate)
 
-        if candidate_x <= label_x + 10 or abs(candidate_y - label_y) > 10:
+        if candidate_x <= label_x + 10 or abs(candidate_y - label_y) > row_tolerance:
             continue
 
         candidates.append((candidate_x - label_x, candidate))
@@ -681,7 +685,11 @@ def line_value(lines: list[dict[str, Any]], index: int, field_name: str) -> tupl
         if class_match:
             return class_match.group(0), [lines[index]["index"]]
 
-    if field_name in {"document_number", "cccd_number"}:
+    if field_name in {
+        "document_number",
+        "cccd_number",
+        "personal_identification_number",
+    }:
         number_match = re.search(r"\d{6,}", current_text)
 
         if number_match:
@@ -715,10 +723,13 @@ def line_value(lines: list[dict[str, Any]], index: int, field_name: str) -> tupl
     if field_name in {"residence", "vehicle_address"}:
         address_patterns = (
             (
+                r"nơi\s+cư\s+\w{1,5}\s*/?\s*pla(?:ce|te)\s*of\s*residence",
+                r"noi\s+cu\s+\w{1,5}\s*/?\s*pla(?:ce|te)\s*of\s*residence",
                 r"nơi\s+thường\s+trú",
                 r"noi\s+thuong\s+tru",
                 r"nơi\s+cư\s+trú",
                 r"noi\s+cu\s+tru",
+                r"place\s*of\s*residence",
                 r"place\s+of\s+residence",
                 r"address",
             )
@@ -750,7 +761,36 @@ def line_value(lines: list[dict[str, Any]], index: int, field_name: str) -> tupl
 
             return normalized_sex, [lines[index]["index"]]
 
-    if field_name in {"date_of_birth", "expiry_date"}:
+        sex_candidates = []
+        _, label_y = line_center(lines[index])
+
+        for candidate in lines:
+            if candidate["index"] == lines[index]["index"]:
+                continue
+
+            candidate_value = searchable_text(candidate["text"])
+
+            if candidate_value not in {"nam", "nu", "male", "female"}:
+                continue
+
+            _, candidate_y = line_center(candidate)
+            vertical_distance = candidate_y - label_y
+
+            if -10 <= vertical_distance <= 110:
+                sex_candidates.append((abs(vertical_distance), candidate))
+
+        if sex_candidates:
+            _, sex_line = min(sex_candidates, key=lambda item: item[0])
+            normalized_sex = {
+                "nam": "Nam",
+                "nu": "Nữ",
+                "male": "Nam",
+                "female": "Nữ",
+            }[searchable_text(sex_line["text"])]
+
+            return normalized_sex, [lines[index]["index"], sex_line["index"]]
+
+    if field_name in {"date_of_birth", "issue_date", "expiry_date", "date_month_year"}:
         date_match = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b", current_text)
 
         if date_match:
@@ -763,10 +803,16 @@ def line_value(lines: list[dict[str, Any]], index: int, field_name: str) -> tupl
             if is_non_field_annotation(candidate["text"]):
                 continue
 
+            if (
+                candidate["index"] != lines[index]["index"]
+                and is_field_label_line(candidate["text"])
+            ):
+                continue
+
             candidate_x, candidate_y = line_center(candidate)
             vertical_distance = candidate_y - label_y
 
-            if vertical_distance < -10 or vertical_distance > 90 or candidate_x <= label_x:
+            if vertical_distance < -10 or vertical_distance > 140:
                 continue
 
             candidate_match = re.search(
@@ -778,16 +824,21 @@ def line_value(lines: list[dict[str, Any]], index: int, field_name: str) -> tupl
                 date_candidates.append(
                     (
                         abs(vertical_distance),
-                        candidate_x - label_x,
+                        0 if candidate_x > label_x else 1,
+                        abs(candidate_x - label_x),
                         candidate_match.group(0),
                         candidate,
                     )
                 )
 
         if date_candidates:
-            _, _, date_value, date_line = min(date_candidates)
+            _, _, _, date_value, date_line = min(date_candidates)
 
             return date_value, [lines[index]["index"], date_line["index"]]
+
+        # Do not let an unrelated value on the same row (for example sex or
+        # nationality) be assigned to a date field when OCR omitted the date.
+        return "", [lines[index]["index"]]
 
     if ":" in current_text:
         value = normalize_text(current_text.split(":", maxsplit=1)[1])
@@ -896,13 +947,17 @@ def format_value(field_name: str, value: str) -> str:
 
     value = normalize_text(value)
 
-    if field_name in {"date_of_birth", "expiry_date"}:
+    if field_name in {"date_of_birth", "issue_date", "expiry_date", "date_month_year"}:
         match = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b", value)
 
         if match:
             return match.group(0).replace("-", "/")
 
-    if field_name in {"document_number", "cccd_number"}:
+    if field_name in {
+        "document_number",
+        "cccd_number",
+        "personal_identification_number",
+    }:
         digits = "".join(re.findall(r"\d", value))
 
         if len(digits) >= 6:
@@ -933,17 +988,69 @@ def field_name_for_document(
     return field_name
 
 
+def clear_conflicting_birth_date(fields: dict[str, Any]) -> None:
+    """Prevent an issue/expiry date from surviving as a birth date.
+
+    OCR label corruption can make a date line pass more than one fuzzy label
+    check. If the source label identifies issue/expiry semantics, clear only
+    the structured assignment; the original OCR line remains available through
+    ``all_ocr_lines`` and can be shown as unmapped content.
+    """
+
+    birth_date = fields.get("date_of_birth")
+    if not isinstance(birth_date, dict):
+        return
+
+    source_text = searchable_text(
+        " ".join(
+            str(birth_date.get(key) or "")
+            for key in ("label", "raw_value")
+        )
+    )
+    expiry_markers = (
+        "cap",
+        "issue",
+        "het han",
+        "expiry",
+        "expires",
+        "gia tri den",
+    )
+    expiry_date = fields.get("expiry_date")
+    same_as_expiry = (
+        isinstance(expiry_date, dict)
+        and birth_date.get("normalized_value")
+        and birth_date.get("normalized_value") == expiry_date.get("normalized_value")
+    )
+
+    if not any(marker in source_text for marker in expiry_markers) and not same_as_expiry:
+        return
+
+    birth_date["raw_value"] = None
+    birth_date["normalized_value"] = None
+    birth_date["confidence"] = None
+    birth_date["source_line_indexes"] = []
+    birth_date["extraction_status"] = "not_detected_conflicting_date_label"
+
+
 def extract_fields(
     lines: list[dict[str, Any]],
     document: dict[str, Any] | None,
+    mrz_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Trích xuất các field phổ biến theo nhãn và loại giấy tờ."""
 
+    lines = clean_ocr_lines(lines)
+    mrz_result = mrz_result if mrz_result is not None else parse_mrz(lines)
+    mrz_indexes = set(mrz_result.get("source_line_indexes", []))
+    lines = [line for line in lines if line["index"] not in mrz_indexes]
     fields = {}
 
     for field_name, labels in FIELD_LABELS.items():
         for position, line in enumerate(lines):
             if not has_field_label(line["text"], labels):
+                continue
+
+            if not has_expected_field_semantics(field_name, line["text"]):
                 continue
 
             if (
@@ -962,14 +1069,73 @@ def extract_fields(
             if not raw_value:
                 continue
 
+            normalized_value = format_value(normalized_field_name, raw_value)
+
+            if not is_valid_field_value(normalized_field_name, normalized_value):
+                continue
+
             fields[normalized_field_name] = {
-                "label": normalize_text(line["text"]),
+                "label": CANONICAL_FIELD_LABELS[field_name],
+                "raw_label": line.get("raw_text", line["text"]),
+                "label_matches": line.get("label_matches", []),
                 "raw_value": raw_value,
-                "normalized_value": format_value(normalized_field_name, raw_value),
+                "normalized_value": normalized_value,
                 "confidence": line.get("confidence"),
                 "source_line_indexes": source_indexes,
             }
             break
+
+    if (
+        document is not None
+        and document.get("document_type") == "citizen_identity_card"
+        and "cccd_number" not in fields
+        and "personal_identification_number" not in fields
+    ):
+        cccd_candidates = []
+
+        for line in lines:
+            line_text = normalize_text(line["text"])
+            digits_only = re.sub(r"\D", "", line_text)
+
+            if len(digits_only) != 12:
+                continue
+
+            if re.search(r"\d{1,2}[/-]\d{1,2}[/-]\d{4}", line_text):
+                continue
+
+            cccd_candidates.append((line, digits_only))
+
+        if len(cccd_candidates) == 1:
+            source_line, cccd_number = cccd_candidates[0]
+            fields["cccd_number"] = {
+                "label": "Số/No (fallback chuỗi CCCD 12 chữ số)",
+                "raw_value": cccd_number,
+                "normalized_value": cccd_number,
+                "confidence": source_line.get("confidence"),
+                "source_line_indexes": [source_line["index"]],
+            }
+
+    identifier = mrz_result.get("identifier")
+    if identifier is not None:
+        fields["mrz_prefix_9"] = {
+            "label": "MRZ vị trí 6-14 (9 số sau tiền tố CCCD)",
+            "raw_value": identifier["prefix_9"],
+            "normalized_value": identifier["prefix_9"],
+            "confidence": identifier["confidence"],
+            "source_line_indexes": identifier["source_line_indexes"],
+        }
+        fields["mrz_document_number"] = {
+            "label": "MRZ (số CCCD đọc từ mặt sau)",
+            "raw_value": identifier["document_number"],
+            "normalized_value": identifier["document_number"],
+            "confidence": identifier["confidence"],
+            "source_line_indexes": identifier["source_line_indexes"],
+            "mrz_positions": {
+                "6_14": identifier["prefix_9"],
+                "16_27": identifier["document_number"],
+                "sequence": identifier["sequence"],
+            },
+        }
 
     vehicle_markers = {
         "brand",
@@ -1001,7 +1167,78 @@ def extract_fields(
                 "source_line_indexes": source_indexes,
             }
 
+    clear_conflicting_birth_date(fields)
+
     return fields
+
+
+def apply_citizen_identity_card_schema(
+    document: dict[str, Any] | None,
+    fields: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Attach the fixed CCCD schema without changing extracted OCR values."""
+
+    if document is None or document.get("document_type") != "citizen_identity_card":
+        return document
+
+    new_card_markers = {
+        "personal_identification_number",
+        "place_of_birth",
+        "issue_date",
+    }
+    card_version = "new" if new_card_markers.intersection(fields) else "legacy"
+    document = dict(document)
+    document["card_version"] = card_version
+    document["fixed_field_names"] = (
+        [
+            "personal_identification_number",
+            "full_name",
+            "date_of_birth",
+            "sex",
+            "nationality",
+            "residence",
+            "place_of_birth",
+            "issue_date",
+            "expiry_date",
+        ]
+        if card_version == "new"
+        else [
+            "cccd_number",
+            "full_name",
+            "date_of_birth",
+            "sex",
+            "nationality",
+            "place_of_origin",
+            "residence",
+            "personal_identification",
+            "date_month_year",
+        ]
+    )
+
+    return document
+
+
+def materialize_citizen_identity_card_fixed_fields(
+    document: dict[str, Any] | None,
+    fields: dict[str, Any],
+) -> None:
+    """Add explicit empty CCCD fields instead of inventing values missing from OCR."""
+
+    if document is None or document.get("document_type") != "citizen_identity_card":
+        return
+
+    for field_name in document.get("fixed_field_names", []):
+        fields.setdefault(
+            field_name,
+            {
+                "label": CCCD_FIXED_FIELD_LABELS[field_name],
+                "raw_value": None,
+                "normalized_value": None,
+                "confidence": None,
+                "source_line_indexes": [],
+                "extraction_status": "not_detected",
+            },
+        )
 
 
 def extract_document_title(lines: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1082,8 +1319,10 @@ def infer_document_from_fields(fields: dict[str, Any]) -> dict[str, Any] | None:
 
     cccd_markers = {
         "document_number",
+        "personal_identification_number",
         "place_of_origin",
         "sex",
+        "full_name",
     }
 
     if len(cccd_markers.intersection(fields)) >= 2:
@@ -1112,6 +1351,73 @@ def infer_document_from_fields(fields: dict[str, Any]) -> dict[str, Any] | None:
                 }
             ),
             "detection_method": "field_label_fallback",
+        }
+
+    cccd_back_markers = {
+        "residence",
+        "place_of_birth",
+        "issue_date",
+        "expiry_date",
+    }
+
+    if len(cccd_back_markers.intersection(fields)) >= 2:
+        source_fields = [
+            fields[field_name]
+            for field_name in cccd_back_markers
+            if field_name in fields
+        ]
+
+        return {
+            "document_type": "citizen_identity_card",
+            "raw_value": "Nhận diện từ nhãn mặt sau CCCD",
+            "normalized_value": "Căn cước công dân / Citizen Identity Card",
+            "confidence": min(
+                field["confidence"]
+                for field in source_fields
+                if field["confidence"] is not None
+            )
+            if any(field["confidence"] is not None for field in source_fields)
+            else None,
+            "source_line_indexes": sorted(
+                {
+                    source_index
+                    for field in source_fields
+                    for source_index in field["source_line_indexes"]
+                }
+            ),
+            "detection_method": "cccd_back_field_label_fallback",
+        }
+
+    # Mặt sau CCCD cũ đôi khi chỉ còn chuỗi MRZ sau khi OCR. Khi đó không thể
+    # dựa vào các nhãn tiếng Việt ở mặt trước/mặt sau để suy ra loại giấy tờ,
+    # nhưng hai trường MRZ đã được trích xuất theo vị trí vẫn là bằng chứng đủ
+    # an toàn để nhận diện CCCD và tiếp tục gán bộ trường cố định.
+    mrz_fields = [
+        fields[field_name]
+        for field_name in ("mrz_prefix_9", "mrz_document_number")
+        if field_name in fields
+    ]
+
+    if len(mrz_fields) == 2:
+        return {
+            "document_type": "citizen_identity_card",
+            "raw_value": "Nhận diện từ chuỗi MRZ mặt sau CCCD",
+            "normalized_value": DOCUMENT_TYPE_LABELS["citizen_identity_card"],
+            "confidence": min(
+                field["confidence"]
+                for field in mrz_fields
+                if field["confidence"] is not None
+            )
+            if any(field["confidence"] is not None for field in mrz_fields)
+            else None,
+            "source_line_indexes": sorted(
+                {
+                    source_index
+                    for field in mrz_fields
+                    for source_index in field["source_line_indexes"]
+                }
+            ),
+            "detection_method": "mrz_identifier_fallback",
         }
 
     return None
@@ -1249,18 +1555,34 @@ def build_structured_result(
     image_path: Path,
     result_name: str,
     output_dir: Path,
+    barcode_image_path: Path | None = None,
 ) -> dict[str, Any]:
     """Tạo dữ liệu field/verification và metadata face crop từ raw OCR."""
 
-    lines = raw_result.get("lines", [])
+    source_lines = raw_result.get("lines", [])
+    lines = clean_ocr_lines(source_lines)
+    mrz_result = parse_mrz(source_lines, image_path=image_path)
+    barcodes = decode_document_barcodes(image_path, barcode_image_path)
     document = extract_document_title(lines)
-    fields = extract_fields(lines, document)
+    fields = extract_fields(lines, document, mrz_result)
 
     if document is None:
         document = infer_document_from_fields(fields)
 
         if document is not None and document["document_type"] == "citizen_identity_card":
-            fields = extract_fields(lines, document)
+            fields = extract_fields(lines, document, mrz_result)
+
+    if document is None and any(
+        record["format"] == "PDF417" for record in identity_barcodes({"barcodes": barcodes})
+    ) and any(field in fields for field in ("personal_identification", "date_month_year", "issue_date")):
+        document = {
+            "document_type": "citizen_identity_card",
+            "normalized_value": DOCUMENT_TYPE_LABELS["citizen_identity_card"],
+            "detection_method": "barcode_and_back_labels",
+            "source_line_indexes": [],
+        }
+    document = apply_citizen_identity_card_schema(document, fields)
+    materialize_citizen_identity_card_fixed_fields(document, fields)
 
     verification = extract_verification(lines, fields)
     face_crop = detect_and_crop_face(image_path, result_name, output_dir)
@@ -1283,8 +1605,17 @@ def build_structured_result(
             "confidence": line.get("confidence"),
             "polygon": line["polygon"],
         }
-        for line in lines
+        for line in source_lines
         if line["index"] not in consumed_indexes
+    ]
+    all_ocr_lines = [
+        {
+            "index": line["index"],
+            "text": normalize_text(line["text"]),
+            "confidence": line.get("confidence"),
+            "polygon": line["polygon"],
+        }
+        for line in source_lines
     ]
 
     return {
@@ -1293,8 +1624,138 @@ def build_structured_result(
         "ocr_engine": raw_result.get("engine", {}),
         "document": document,
         "fields": fields,
+        "mrz": mrz_result,
+        "barcodes": barcodes,
+        "text_cleaning": {
+            "version": 1,
+            "lines": [
+                {
+                    "index": line["index"],
+                    "raw_text": line["raw_text"],
+                    "normalized_text": line["text"],
+                    "label_matches": line["label_matches"],
+                }
+                for line in lines
+            ],
+        },
         "verification": verification,
         "face_crop": face_crop,
+        "all_ocr_lines": all_ocr_lines,
         "unmapped_raw_lines": unmapped_raw_lines,
         "raw_ocr_path": f"ocr_raw_result_{result_name}.json",
+    }
+
+
+def build_citizen_identity_card_pair_result(
+    front_result: dict[str, Any],
+    back_result: dict[str, Any],
+    front_filename: str,
+    back_filename: str,
+) -> dict[str, Any]:
+    """Ghép OCR hai mặt của một CCCD thành một hồ sơ duy nhất.
+
+    Hàm chỉ ghép theo thứ tự mặt trước/mặt sau do người gọi cung cấp. Giá trị
+    có trên mặt trước được ưu tiên; mặt sau chỉ bổ sung trường còn thiếu để
+    tránh ghi đè số CCCD, họ tên hoặc ảnh khuôn mặt từ mặt trước.
+    """
+
+    front_document = front_result.get("document") or {}
+    back_document = back_result.get("document") or {}
+    front_is_cccd = front_document.get("document_type") == "citizen_identity_card"
+    back_is_cccd = back_document.get("document_type") == "citizen_identity_card"
+
+    if not front_is_cccd:
+        raise ValueError("Ảnh mặt trước không được nhận diện là CCCD.")
+
+    if not back_is_cccd:
+        raise ValueError("Ảnh mặt sau không được nhận diện là CCCD.")
+
+    fields: dict[str, Any] = {}
+
+    for side, result in (("front", front_result), ("back", back_result)):
+        for field_name, field in result.get("fields", {}).items():
+            field_with_side = copy.deepcopy(field)
+            field_with_side["source_side"] = side
+            existing = fields.get(field_name)
+
+            if existing is None or not existing.get("normalized_value"):
+                fields[field_name] = field_with_side
+
+    unmapped_raw_lines = []
+    all_ocr_lines = []
+    cleaned_lines = []
+
+    for record_index, record in enumerate(identity_barcodes(back_result)):
+        for field_name, value in record["parsed"]["fields"].items():
+            if field_name not in CANONICAL_FIELD_LABELS:
+                continue
+            target = "cccd_number" if field_name == "personal_identification_number" and "cccd_number" in fields else field_name
+            if (fields.get(target) or {}).get("normalized_value"):
+                continue
+            fields[target] = {
+                "label": CANONICAL_FIELD_LABELS["document_number"] if target == "cccd_number" else CANONICAL_FIELD_LABELS[target],
+                "raw_value": value, "normalized_value": format_value(target, value),
+                "confidence": None, "source_line_indexes": [],
+                "source_side": "back", "source_type": "barcode",
+                "source_record_index": record_index,
+            }
+
+    for side, result in (("front", front_result), ("back", back_result)):
+        for line in result.get("unmapped_raw_lines", []):
+            line_with_side = copy.deepcopy(line)
+            line_with_side["source_side"] = side
+            unmapped_raw_lines.append(line_with_side)
+
+        for line in result.get("all_ocr_lines", []):
+            line_with_side = copy.deepcopy(line)
+            line_with_side["source_side"] = side
+            all_ocr_lines.append(line_with_side)
+
+        for line in result.get("text_cleaning", {}).get("lines", []):
+            line_with_side = copy.deepcopy(line)
+            line_with_side["source_side"] = side
+            cleaned_lines.append(line_with_side)
+
+    front_face_crop = copy.deepcopy(front_result.get("face_crop") or {})
+    front_face_crop.pop("path", None)
+    front_face_crop["persisted"] = False
+    front_face_crop["source_side"] = "front"
+
+    return {
+        "status": "completed",
+        "document": {
+            "document_type": "citizen_identity_card",
+            "normalized_value": DOCUMENT_TYPE_LABELS["citizen_identity_card"],
+            "detection_method": "paired_front_back",
+        },
+        "sides": {
+            "front": {
+                "source_filename": front_filename,
+                "document": front_document,
+                "face_crop": front_face_crop,
+            },
+            "back": {
+                "source_filename": back_filename,
+                "document": back_document,
+            },
+        },
+        "fields": fields,
+        "mrz": copy.deepcopy(back_result.get("mrz", {})),
+        "barcodes": {
+            "front": copy.deepcopy(front_result.get("barcodes", {})),
+            "back": copy.deepcopy(back_result.get("barcodes", {})),
+        },
+        "text_cleaning": {"version": 1, "lines": cleaned_lines},
+        "verification": {
+            "front": front_result.get("verification"),
+            "back": back_result.get("verification"),
+        },
+        "all_ocr_lines": all_ocr_lines,
+        "unmapped_raw_lines": unmapped_raw_lines,
+        "pairing": {
+            "status": "paired",
+            "front_detected_as_cccd": front_is_cccd,
+            "back_detected_as_cccd": back_is_cccd,
+            "field_precedence": "front_then_back_for_missing_values",
+        },
     }

@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+from pathlib import Path
 
 
 # =========================================================
@@ -11,15 +12,14 @@ BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
 )
 
-OUTPUT_DIR = os.path.join(
-    BASE_DIR,
-    "output"
-)
+OUTPUT_DIR = Path(
+    os.environ.get(
+        "PIPELINE_OUTPUT_DIR",
+        os.path.join(BASE_DIR, "output"),
+    )
+).resolve()
 
-os.makedirs(
-    OUTPUT_DIR,
-    exist_ok=True
-)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # =========================================================
@@ -63,10 +63,7 @@ def run_script(
 
 def check_output(filename):
 
-    path = os.path.join(
-        BASE_DIR,
-        filename
-    )
+    path = OUTPUT_DIR / filename
 
     if not os.path.exists(path):
         raise FileNotFoundError(
@@ -124,6 +121,10 @@ os.environ["OCR_INPUT_STAGE"] = "preprocessed_final"
 os.environ["OCR_RAW_OUTPUT_FILENAME"] = "ocr_raw_result.json"
 os.environ["OCR_STRUCTURED_OUTPUT_FILENAME"] = "ocr_structured_result.json"
 
+# Khi được gọi từ FastAPI, OCR được thực hiện trong process thường trực để
+# tái sử dụng các model đã nạp. Chạy trực tiếp pipeline.py vẫn giữ đủ 8 bước.
+skip_ocr = os.environ.get("PIPELINE_SKIP_OCR") == "1"
+
 print()
 print("=" * 60)
 print("DOCUMENT IMAGE PREPROCESSING PIPELINE")
@@ -144,7 +145,7 @@ run_script(
 )
 
 check_output(
-    "output/orientation_corrected.jpg"
+    "orientation_corrected.jpg"
 )
 
 
@@ -158,7 +159,7 @@ run_script(
 )
 
 check_output(
-    "output/document_crop.jpg"
+    "document_crop.jpg"
 )
 
 
@@ -172,7 +173,7 @@ run_script(
 )
 
 check_output(
-    "output/document_deskew.jpg"
+    "document_deskew.jpg"
 )
 
 
@@ -186,7 +187,7 @@ run_script(
 )
 
 check_output(
-    "output/document_deglare.jpg"
+    "document_deglare.jpg"
 )
 
 
@@ -200,7 +201,7 @@ run_script(
 )
 
 check_output(
-    "output/document_deblur.jpg"
+    "document_deblur.jpg"
 )
 
 
@@ -214,40 +215,42 @@ run_script(
 )
 
 check_output(
-    "output/document_final.jpg"
+    "document_final.jpg"
 )
 
 
-# =========================================================
-# STEP 7
-# OCR FROM FINAL PREPROCESSED IMAGE
-# =========================================================
+if skip_ocr:
+    print("OCR and structured extraction are handled by the FastAPI process.")
+else:
+    # =========================================================
+    # STEP 7
+    # OCR FROM FINAL PREPROCESSED IMAGE
+    # =========================================================
 
-run_script(
-    "test_ocr.py",
-    "output/document_final.jpg"
-)
+    run_script(
+        "test_ocr.py",
+        str(OUTPUT_DIR / "document_final.jpg")
+    )
 
-check_output(
-    "output/ocr_raw_result.json"
-)
+    check_output(
+        "ocr_raw_result.json"
+    )
 
+    # =========================================================
+    # STEP 8
+    # Structured OCR fields + face crop
+    # =========================================================
 
-# =========================================================
-# STEP 8
-# Structured OCR fields + face crop
-# =========================================================
+    run_script(
+        "test_structured_extraction.py",
+        str(OUTPUT_DIR / "ocr_raw_result.json"),
+        str(OUTPUT_DIR / "document_final.jpg"),
+        "current",
+    )
 
-run_script(
-    "test_structured_extraction.py",
-    "output/ocr_raw_result.json",
-    "output/document_final.jpg",
-    "current",
-)
-
-check_output(
-    "output/ocr_structured_result.json"
-)
+    check_output(
+        "ocr_structured_result.json"
+    )
 
 
 # =========================================================
@@ -265,10 +268,7 @@ print(
 )
 
 print(
-    os.path.join(
-        OUTPUT_DIR,
-        "document_deblur.jpg"
-    )
+    OUTPUT_DIR / "document_deblur.jpg"
 )
 
 print()
@@ -277,34 +277,26 @@ print(
 )
 
 print(
-    os.path.join(
-        OUTPUT_DIR,
-        "document_final.jpg"
+    OUTPUT_DIR / "document_final.jpg"
+)
+
+if not skip_ocr:
+    print()
+    print(
+        "OCR output:"
     )
-)
 
-print()
-print(
-    "OCR output:"
-)
-
-print(
-    os.path.join(
-        OUTPUT_DIR,
-        "ocr_raw_result.json"
+    print(
+        OUTPUT_DIR / "ocr_raw_result.json"
     )
-)
 
-print()
-print(
-    "Structured OCR output:"
-)
-
-print(
-    os.path.join(
-        OUTPUT_DIR,
-        "ocr_structured_result.json"
+    print()
+    print(
+        "Structured OCR output:"
     )
-)
+
+    print(
+        OUTPUT_DIR / "ocr_structured_result.json"
+    )
 
 print()
