@@ -30,6 +30,12 @@
                     <span class="hidden text-sm text-slate-300 sm:inline">{{ auth()->user()->name }}</span>
                     @role('admin')
                         <a href="{{ route('admin.users') }}" class="text-sm text-cyan-300 transition hover:text-cyan-200">Quản trị</a>
+                        @can('documents.export-management-csv')
+                            <a href="{{ route('admin.exports.index') }}"
+                            class="text-sm text-cyan-300 hover:text-cyan-200">
+                                Xuất dữ liệu CSV
+                            </a>
+                        @endcan
                     @endrole
                     <form method="POST" action="{{ route('logout') }}">
                         @csrf

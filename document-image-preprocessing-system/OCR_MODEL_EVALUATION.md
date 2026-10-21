@@ -1,6 +1,6 @@
 # OCR model, provider và phạm vi đánh giá
 
-Đối chiếu với `ai-engine/ocr_service.py`, `ai-engine/app.py`, `SystemSetting` và `structured_extraction.py` ngày **17/10/2026**. Tài liệu mô tả những nhánh đã được triển khai. Project chưa có báo cáo benchmark chuẩn hóa đủ để kết luận một model/provider chính xác hoặc nhanh nhất.
+Đối chiếu với `ai-engine/ocr_service.py`, `ai-engine/app.py`, `SystemSetting` và `structured_extraction.py` ngày **21/10/2026**. Tài liệu mô tả những nhánh đã được triển khai. Project chưa có báo cáo benchmark chuẩn hóa đủ để kết luận một model/provider chính xác hoặc nhanh nhất.
 
 ## 1. Luồng mặc định: local_hybrid
 
@@ -99,3 +99,13 @@ Các liên kết tham khảo đã có trong tài liệu khảo sát:
 - [TrOCR](https://huggingface.co/docs/transformers/model_doc/trocr)
 
 Các nguồn trên dùng để tìm tài liệu của từng công cụ; phần mô tả runtime của hệ thống trong tài liệu này được đối chiếu từ source local, không xác nhận lại khả năng hay phiên bản mới nhất của các công cụ khảo sát.
+
+## 8. Dependency và thay đổi chuẩn hóa hiện tại
+
+Cấu hình cài mới CPU nằm trong `ai-engine/requirements.txt`, được `requirement.txt` ở root tham chiếu. Detector và orientation đều chỉ định ONNX Runtime; không cài PaddlePaddle/CUDA chỉ để chạy hai model này. VietOCR dùng torch/torchvision CPU từ index chính thức. NumPy 1.26.4 và các gói OpenCV 4.10.0.84 được ghim cho môi trường cài mới để tránh trộn cv2 4.x/5.x và dependency cũ imgaug. Các tên opencv-python, opencv-python-headless và opencv-contrib-python cùng tồn tại vì metadata phụ thuộc của VietOCR/PaddleX; chúng cùng phiên bản. Không thay các file trong venv Linux đang có.
+
+Nguồn cài CPU: [PyTorch CPU wheels](https://download.pytorch.org/whl/cpu/torch/), [Torchvision CPU wheels](https://download.pytorch.org/whl/cpu/torchvision/), [VietOCR trên PyPI](https://pypi.org/project/vietocr/). Danh sách requirements.txt ghim gói trực tiếp; Linux có thêm requirements-linux.lock.txt với 110 package runtime từ môi trường đã kiểm thử. Khi đổi dependency cần cập nhật lock và kiểm thử lại; Windows vẫn dùng requirements.txt. Setuptools được ghim 80.10.2 vì gdown 4.4.0 còn import pkg_resources, không dùng setuptools >=81.
+
+Bootstrap VietOCR dùng tempfile.gettempdir() để tìm trọng số vừa tải, thay đường dẫn /tmp cố định, tương thích thư mục tạm Windows/Linux. Model OCR có thể tải ở lần xử lý đầu; /health không bảo đảm model đã tải. YuNet vẫn cần file model đúng đường dẫn trong source, không được bộ chạy tự tải.
+
+Parser QR chấp nhận phần phân cách rỗng ở cuối payload bảy trường; phần bổ sung khác rỗng vẫn unsupported. Sửa OCR bằng tay hiện cho phép bổ sung các field hiển thị của bằng lái và đăng ký xe, ngoài CCCD; giá trị do người dùng sửa không phải kết quả đo độ chính xác của model.

@@ -1,6 +1,122 @@
 # Hướng dẫn chạy project
 
-Đối chiếu source ngày **17/10/2026**. Project gồm Laravel UI, database (SQLite hoặc MySQL) và FastAPI AI Engine. Các lệnh local dưới đây chọn Laravel cổng **8001**, AI Engine cổng **8000** để không trùng nhau; đây là ví dụ cấu hình, không phải phát hiện service đang chạy.
+Đối chiếu source ngày **21/10/2026**. Project gồm Laravel UI, database (SQLite hoặc MySQL) và FastAPI AI Engine. Các lệnh local dưới đây chọn Laravel cổng **8001**, AI Engine cổng **8000** để không trùng nhau; đây là ví dụ cấu hình, không phải phát hiện service đang chạy.
+
+## 0. Chạy tự động trên Windows
+
+Từ CMD trong thư mục project:
+
+```bat
+run_project.bat
+```
+
+### Công cụ cần cài trước
+
+- Windows 10/11 x64, PowerShell 5.1 trở lên (có sẵn trên Windows).
+- PHP 8.3+ CLI và Composer 2 trong PATH. Bật extension curl, dom, fileinfo, gd, iconv, mbstring, openssl, PDO, session, tokenizer, xml, xmlwriter, zip; thêm pdo_sqlite cho SQLite hoặc pdo_mysql cho MySQL. Composer kiểm tra thêm các yêu cầu của lock.
+- Node.js thỏa engines của Vite 8: nhánh 20 từ 20.19, hoặc nhánh 22 từ 22.12 trở lên (không dùng Node 21).
+- Python **3.12 x64**, có py launcher hoặc python trong PATH.
+- Internet và dung lượng trống cho thư viện CPU/model; Visual C++ Redistributable x64 nếu Windows thiếu DLL runtime.
+
+BAT không tự cài PHP/Node/Python/MySQL hay chỉnh php.ini của máy. Nó cài các **thư viện của project** sau khi các runtime trên đã sẵn sàng. Nếu dùng MySQL trong .env đã có, cần tạo database/khởi động MySQL trước; cài mới từ .env.example dùng SQLite nên không cần MySQL.
+
+### Các bước bộ chạy thực hiện
+
+1. Kiểm tra runtime, extension PHP và hai cổng 8001/8000. Dừng nếu cổng đang có tiến trình khác.
+2. Tạo .env từ .env.example nếu chưa có, giữ file đang có. Từ chối APP_ENV=production.
+3. composer install từ composer.lock, kiểm tra platform; npm ci khi có package-lock, sau đó build assets. Bỏ public/hot cũ để dùng assets vừa build.
+4. Tạo venv Windows riêng ở ai-engine/.venv-windows, cài requirement.txt bằng pip và kiểm tra xung đột dependency. Không tái sử dụng venv Linux có sẵn.
+5. Giữ APP_KEY hiện có, chỉ key:generate khi trống; tạo file SQLite nếu thiếu; migrate, không migrate:fresh. Chỉ db:seed demo khi users đang rỗng; database đã có user không tự chạy lại seeder hay reset mật khẩu/quyền.
+6. Khởi chạy Uvicorn, php artisan serve và schedule:work trong cùng cửa sổ; chờ /health của AI và /up của Laravel phản hồi, mở trình duyệt. Giữ cửa sổ đang chạy; Ctrl+C kết thúc các tiến trình do script tạo.
+
+Phần triển khai là run_project.ps1, BAT gọi PowerShell với ExecutionPolicy Bypass **chỉ cho tiến trình đó**, không đổi chính sách của máy.
+
+```bat
+rem Chay lai khi da cai dat, bo qua Composer/npm/pip/build
+run_project.bat -SkipInstall
+
+rem Doi cong, khong tu mo trinh duyet
+run_project.bat -WebPort 8081 -AiPort 8080 -NoBrowser
+```
+
+Bộ chạy đặt APP_URL/AI_ENGINE_URL theo cổng truyền vào, tắt APP_FORCE_HTTPS và SESSION_SECURE_COOKIE **trong môi trường tiến trình local**, không sửa các giá trị này trong .env. Nó xóa config cache để các giá trị mới có hiệu lực. Bộ chạy không thiết lập Nginx/chứng chỉ HTTPS 8443. Dùng cấu hình HTTPS thủ công ở mục 9 khi cần.
+
+Riêng khi gọi bằng BAT, các biến OCR_PROVIDER, AI_OCR_PROVIDER_STATE_PATH, AI_MAX_CONCURRENT_JOBS, AI_LOCAL_OCR_WORKERS, FPT_AI_READER_*, VNPT_EKYC_OCR_* và EKYC_OCR_* được đọc từ .env sang tiến trình AI nếu chưa được đặt trong môi trường. Hỗ trợ dòng KEY=value đơn giản, giá trị có thể bọc dấu nháy; không triển khai đầy đủ nội suy/định dạng multiline của dotenv. Khi chạy Uvicorn thủ công, vẫn phải tự export/set biến như các mục bên dưới. Không in credential ra màn hình.
+
+Model OCR được tải theo cơ chế lazy ở lần sử dụng đầu tiên; khởi động thành công không chứng minh đã OCR thành công. YuNet là tùy chọn: cần file model tại đúng đường dẫn source; thiếu model thì face_crop báo model_not_available, không làm OCR thất bại. SMTP mẫu cần thay credential để gửi mail reset thật.
+
+Dependency Python được ràng buộc cho môi trường CPU mới (NumPy 1.26.4; OpenCV cùng bản 4.10.0.84; torch/torchvision CPU), khác bản freeze Linux cũ. Không tự thay thư viện trong venv đang vận hành. Không có kết quả chạy bộ cài Windows trong môi trường Linux dùng để cập nhật source/tài liệu này.
+
+### File requirements
+
+| File | Cách sử dụng |
+| --- | --- |
+| requirement.txt | python -m pip install -r requirement.txt từ root |
+| ai-engine/requirements.txt | Danh sách Python chung, root requirement.txt tham chiếu file này |
+| ai-engine/requirements-linux.lock.txt | Bộ 110 package runtime đã ghim cho launcher Linux x86_64/Python 3.12 |
+| requirement-php.txt / php-requirements.txt | Danh sách PHP/extension/package tham khảo đồng bộ từ composer.lock, không phải file pip |
+| composer.lock | composer install để cài đúng PHP dependency, gồm laravel-dompdf |
+| package-lock.json | npm ci để cài JS dependency |
+
+Bản Python cài mới dùng ONNX Runtime cho PaddleX/PaddleOCR theo source, không yêu cầu cài PaddlePaddle hoặc CUDA. VietOCR dùng PyTorch CPU. Các gói OpenCV có nhiều tên do dependency upstream yêu cầu; được ghim cùng phiên bản để tránh trộn nhị phân cv2. Danh sách chỉ ghim gói chính/constraint cần thiết, các gói transitive còn do pip giải nên chưa tương đương một lock đầy đủ.
+
+## 0.1. Chạy tự động trên Linux
+
+Bộ chạy `run_project.sh` dành cho Linux x86_64 dùng glibc >=2.28, Bash và Python 3.12 x64. Không dùng bộ dependency này cho Alpine/musl hoặc ARM. Cài trước Python 3.12, Node.js thỏa Vite 8 (20.19 hoặc 22.12 trở lên theo điều kiện ở trên), PHP 8.3+ và Composer 2, cùng extension PHP. Không gọi cả script bằng sudo.
+
+```bash
+chmod +x run_project.sh
+./run_project.sh
+```
+
+Nếu dùng Ubuntu 24.04 hoặc bản dẫn xuất Ubuntu noble (như Mint 22), tùy chọn dưới đây cài PHP 8.3/extension, Composer, python3.12-venv, curl/git/unzip, libGL, GLib và libgomp bằng sudo apt; có thể yêu cầu mật khẩu Linux. Python 3.12 để chạy bộ cài và Node đúng phiên bản vẫn cần có trước:
+
+```bash
+./run_project.sh --install-system-deps
+```
+
+Tùy chọn cài package hệ điều hành hỗ trợ Ubuntu 24.04 và các bản dẫn xuất dùng Ubuntu noble như Mint 22; distro khác cần tự cài các package tương đương. Mặc định script không gọi sudo/apt. Node từ kho mặc định Ubuntu có thể quá cũ cho Vite 8, nên script không tự cài hoặc nâng Node qua apt.
+
+Quy trình cài dependency, giữ key/database, chỉ seed khi users rỗng và override URL local tương tự bộ chạy Windows. Python được cài trong `ai-engine/.venv-linux` riêng từ `ai-engine/requirements-linux.lock.txt` (110 package runtime đã ghim), không dùng hoặc cập nhật `ai-engine/venv` đang có. Setuptools 80.10.2 được giữ để gdown/VietOCR còn import được pkg_resources. Composer/npm/pip và bước build chỉ bị bỏ qua khi truyền --skip-install. Mỗi lần chạy vẫn migrate và kiểm tra database. MySQL đang cấu hình phải được khởi động/tạo database trước; cài mới dùng SQLite từ .env.example.
+
+```bash
+./run_project.sh --skip-install
+./run_project.sh --web-port 8081 --ai-port 8080 --no-browser
+```
+
+Laravel/AI mặc định cổng 8001/8000, chỉ bind loopback; scheduler chạy cùng launcher. File .run-project.lock ngăn chạy hai launcher Linux trong cùng checkout. Nếu cổng đang dùng, script dừng trước khi cài dependencies. Script từ chối môi trường production và không thiết lập Nginx/HTTPS.
+
+Log được append riêng cho từng dịch vụ:
+
+```bash
+tail -f storage/logs/run-project-ai.log
+tail -f storage/logs/run-project-laravel.log
+tail -f storage/logs/run-project-scheduler.log
+```
+
+Chờ AI /health và Laravel /up thành công rồi mở trình duyệt nếu có desktop và xdg-open. Model OCR tải ở lần dùng đầu; YuNet tùy chọn như mục Windows. Ctrl+C/SIGTERM dừng các process group do launcher tạo, gồm process con; nếu một dịch vụ thoát thì các dịch vụ còn lại cũng được dừng. Nội dung .env được đọc dưới dạng KEY=value đơn giản, không source/eval như shell; các biến OCR được chuyển sang môi trường AI tương tự Windows, không in credential.
+
+### Kết quả kiểm chứng ngày 21/10/2026
+
+Đã chạy trên Linux Mint 22.3 x86_64 (base Ubuntu noble), PHP 8.3.6, Node 22.22.2, Python 3.12.3. Bản sao tại /tmp không có vendor/node_modules/venv/model-cache/database/.env lúc bắt đầu; dùng SQLite và cổng riêng, không dùng dữ liệu hoặc sửa thư viện của hệ thống đang chạy. Hai extension PHP gd/zip còn thiếu được giải nén vào /tmp rồi nạp qua PHP_INI_SCAN_DIR, không cài vào PHP của máy.
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| Composer install + check-platform-reqs | Thành công |
+| npm ci + Vite build | Thành công |
+| pip install mới + pip check | Thành công sau khi ghim setuptools 80.10.2 |
+| Migrate và seed trên SQLite trống | Thành công sau khi reset cache quyền trong seeder; regression test DatabaseBootstrapTest qua 11 assertions |
+| AI /health và Laravel /up | HTTP 200, scheduler chạy |
+| Xử lý ảnh qua AI với model-cache mới | HTTP 200, completed, có JPEG và 16 dòng OCR trên ảnh kiểm thử |
+| Customer đăng nhập và upload qua Laravel | Thành công, trang hồ sơ completed |
+| Tải PDF; Admin xuất CSV với hai ngày trống | HTTP 200, đúng định dạng file |
+| Dừng bằng SIGTERM/Ctrl+C | Exit 0; hai cổng web/AI được giải phóng, không còn dịch vụ kiểm thử lắng nghe |
+| Cài/chạy lại đầy đủ | Giữ nguyên .env/APP_KEY, mật khẩu demo và hồ sơ đã tạo |
+| 7 kiểm tra bảo vệ launcher | Qua: help, cổng trùng/không hợp lệ/bị chiếm, production, thiếu dependency, không thực thi giá trị .env và giữ key |
+
+Đã phát hiện và sửa hai lỗi cài mới: setuptools mới bỏ pkg_resources trong khi gdown còn cần; DatabaseSeeder dùng WithoutModelEvents nên cache permissions cần được làm mới trước khi gán role. Bộ phiên bản runtime kiểm chứng được ghi vào requirements-linux.lock.txt để máy khác không tự lấy phiên bản transitive mới hơn.
+
+Đây là kiểm thử bản sao sạch trên máy Linux hiện tại, không phải xác nhận đã chạy trên mọi thiết bị/distro. Chưa chạy sudo apt install thật: chỉ tải extension tạm và kiểm tra apt mô phỏng giải được danh sách package. Máy đích vẫn cần runtime, kiến trúc/glibc phù hợp, Internet tải package/model và RAM/dung lượng cho OCR. MySQL, SMTP thật, HTTPS/Nginx và các vendor OCR ngoài không nằm trong lượt kiểm chứng này.
 
 ## 1. Yêu cầu và cài đặt Laravel
 
@@ -151,7 +267,16 @@ Scheduler gọi `documents:purge-expired` hằng ngày lúc `DOCUMENT_RETENTION_
 8. Processor/Reviewer xem hàng đợi `pending_review`, chọn xác thực hoặc yêu cầu gửi lại kèm lý do. Trạng thái hồ sơ chính và mặt phụ được đồng bộ.
 9. Admin xem dữ liệu, quản lý tài khoản, audit log, metrics và OCR provider; không upload/chỉnh OCR/xác thực trên UI hồ sơ.
 
-Trang chủ hiện chỉ có tối đa **6 hồ sơ gần nhất** theo vai trò và ẩn các mặt phụ đã ghép. Chưa có trang lịch sử phân trang, tìm kiếm, xoay ảnh thủ công, retry thủ công hoặc export từ UI. Công cụ export Python là CLI riêng.
+Trang chủ có tối đa **6 hồ sơ gần nhất** theo vai trò, ẩn mặt phụ đã ghép. Customer mở `/my-documents` để xem lịch sử 10 hồ sơ/trang và lọc trạng thái. Có PDF theo hồ sơ và CSV Admin; chưa có tìm kiếm tự do, xoay ảnh hoặc retry thủ công. Công cụ export Python vẫn là CLI riêng.
+
+### Xuất báo cáo và điều kiện lọc
+
+- Customer mở hồ sơ chính đủ quyền, chưa purge, trạng thái completed/pending_review/verified/resubmission_required và có normalized value để tải PDF từ nút Xuất báo cáo PDF. Staff/Admin không được xuất PDF theo policy hiện tại.
+- Admin vào `/admin/exports`, chọn management hoặc ocr. Cần documents.export-management-csv; OCR cần thêm documents.export-ocr-csv. Giới hạn POST 5/phút và tối đa 5.000 hồ sơ chính.
+- Lọc status, document_type và ngày tạo created_at. Bỏ trống hai ngày để không lọc thời gian. Nhập Từ ngày thì phải nhập Đến ngày >= Từ ngày; chỉ nhập Đến ngày được phép. So sánh bao gồm ngày đầu/ngày cuối theo timezone config ứng dụng (hiện UTC).
+- OCR chỉ lấy hồ sơ completed/pending_review/verified/resubmission_required chưa purge, có normalized field không rỗng; dữ liệu ghép được ưu tiên. CSV không có kết quả vẫn có header.
+- Giới hạn source hiện tại: loại CCCD chưa tách new/legacy theo card_version, Unknown/unknown chưa thống nhất nhãn; form CSV thiếu @csrf và các select chưa giữ old(). Đây là các điểm đã rà soát, không được tài liệu coi là đã sửa. Chi tiết ở LARAVEL_AI_ENGINE_INTEGRATION.md.
+- Khi OCR thiếu field, Customer được bổ sung trường hợp lệ của CCCD, bằng lái hoặc đăng ký xe rồi lưu; field lạ bị từ chối thay vì âm thầm bỏ qua.
 
 ## 6. Dữ liệu, file tạm và mã hóa
 

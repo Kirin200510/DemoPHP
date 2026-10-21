@@ -115,4 +115,47 @@ class ImageDocumentPolicy
     {
         return $user->hasAnyRole(['admin', 'processor', 'reviewer']);
     }
+
+    public function exportReport(User $user, ImageDocument $imageDocument): bool
+    {
+        if ($user->hasAnyRole(['admin', 'processor', 'reviewer'])) {
+            return false;
+        }
+        if (! $user->can('documents.view-own')) {
+            return false;
+        }
+        if ($imageDocument->user_id !== $user->id) {
+            return false;
+        }
+        // Không cho phép xuất báo cáo nếu hồ sơ đã được gộp vào hồ sơ khác
+        if ($imageDocument->merged_into_document_id !== null) {
+            return false;
+        }
+        if ($imageDocument->purged_at !== null) {
+            return false;
+        }
+        $allowedStatus = [
+            ImageDocument::STATUS_COMPLETED,
+            ImageDocument::STATUS_VERIFIED,
+            ImageDocument::STATUS_PENDING_REVIEW,
+            ImageDocument::STATUS_RESUBMISSION_REQUIRED,
+        ];
+        if (! in_array($imageDocument->status, $allowedStatus, true)) {
+            return false;
+        }
+        // Chọn data tổng hợp nếu khớp 2 mặt
+        $isPaired = data_get($imageDocument->ocr_structured_data, 'pairing.status') === 'matched';
+        $fields = $isPaired
+                    ? data_get($imageDocument->ocr_structured_data, 'paired_normalized_ocr.fields')
+                    : data_get($imageDocument->ocr_structured_data, 'fields');
+        foreach ($fields as $field) {
+            $value = data_get($field, 'normalized_value');
+            // Kiểm tra nếu giá trị là một chuỗi không rỗng và không phải là null hoặc false, thì cho phép xuất báo cáo
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

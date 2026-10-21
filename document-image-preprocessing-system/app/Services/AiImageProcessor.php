@@ -174,7 +174,7 @@ class AiImageProcessor
             ->withHeaders([
                 'X-OCR-Provider' => SystemSetting::ocrProvider(),
             ])
-            ->post('/document-sides/match', $structuredResults);
+            ->post('/document-sides/match', $this->normalizePairingPayload($structuredResults));
 
         if ($response->serverError()) {
             throw new AiEngineUnavailableException(
@@ -203,7 +203,8 @@ class AiImageProcessor
 
         if ($response->failed()) {
             throw new AiEngineResponseException(
-                'AI engine từ chối yêu cầu ghép dữ liệu hai mặt giấy tờ.',
+                sprintf('AI engine từ chối yêu cầu ghép dữ liệu hai mặt giấy tờ (HTTP %d).', $response->status()),
+                $response->status(),
             );
         }
 
@@ -228,6 +229,45 @@ class AiImageProcessor
         }
 
         return $payload;
+    }
+
+    /**
+     * Restore empty JSON objects after associative decoding and model array casts.
+     *
+     * @param  list<array<string, mixed>>  $structuredResults
+     * @return list<array<string, mixed>>
+     */
+    private function normalizePairingPayload(array $structuredResults): array
+    {
+        foreach ($structuredResults as &$result) {
+            foreach (['document', 'fields', 'barcodes', 'mrz'] as $key) {
+                if (($result[$key] ?? null) === []) {
+                    $result[$key] = (object) [];
+                }
+            }
+
+            if (! is_array($result['barcodes'] ?? null)
+                || ! is_array($result['barcodes']['records'] ?? null)) {
+                continue;
+            }
+
+            foreach ($result['barcodes']['records'] as &$record) {
+                if (! is_array($record)) {
+                    continue;
+                }
+
+                if (($record['parsed'] ?? null) === []) {
+                    $record['parsed'] = (object) [];
+                } elseif (is_array($record['parsed'] ?? null)
+                    && ($record['parsed']['fields'] ?? null) === []) {
+                    $record['parsed']['fields'] = (object) [];
+                }
+            }
+            unset($record);
+        }
+        unset($result);
+
+        return $structuredResults;
     }
 
     /**

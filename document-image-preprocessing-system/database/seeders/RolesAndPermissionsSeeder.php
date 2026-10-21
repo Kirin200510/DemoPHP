@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 class RolesAndPermissionsSeeder extends Seeder
 {
@@ -13,6 +14,9 @@ class RolesAndPermissionsSeeder extends Seeder
      */
     public function run(): void
     {
+        $permissionRegistrar = app(PermissionRegistrar::class);
+        $permissionRegistrar->forgetCachedPermissions();
+
         $permissions = [
             'documents.upload', 'documents.view-own', 'documents.view-any',
             'documents.view-original', 'documents.view-processed',
@@ -24,11 +28,15 @@ class RolesAndPermissionsSeeder extends Seeder
             'users.view', 'users.create', 'users.update', 'users.lock',
             'users.unlock', 'roles.view', 'roles.assign', 'permissions.manage',
             'audit.view',
+            'documents.export-management-csv',
+            'documents.export-ocr-csv',
         ];
 
         foreach ($permissions as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
+
+        $permissionRegistrar->forgetCachedPermissions();
 
         $adminPermissions = array_values(array_diff($permissions, [
             'documents.upload',

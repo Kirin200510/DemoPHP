@@ -3,6 +3,7 @@ import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from shutil import copy2
+from tempfile import gettempdir
 from typing import Any
 
 import requests
@@ -436,7 +437,7 @@ def bootstrap_recognizer() -> Predictor:
     config["device"] = "cpu"
     _recognizer = Predictor(config)
 
-    downloaded_weights = Path("/tmp") / Path(config["weights"]).name
+    downloaded_weights = Path(gettempdir()) / Path(config["weights"]).name
 
     if not downloaded_weights.is_file():
         raise FileNotFoundError(

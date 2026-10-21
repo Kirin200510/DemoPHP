@@ -1,6 +1,6 @@
 # Nghiệp vụ xác thực và phân quyền
 
-Đối chiếu source ngày **17/10/2026**. Tài liệu mô tả cơ chế đang có trong project Laravel hiện tại. Xác thực tài khoản dùng **Laravel Fortify**, phân quyền dùng **Spatie Laravel Permission**, còn quyền trên từng hồ sơ được kiểm tra bằng **`ImageDocumentPolicy`** và middleware `auth`/`active`. Khu vực quản trị còn có middleware `role:admin`.
+Đối chiếu source ngày **21/10/2026**. Tài liệu mô tả cơ chế đang có trong project Laravel hiện tại. Xác thực tài khoản dùng **Laravel Fortify**, phân quyền dùng **Spatie Laravel Permission**, còn quyền trên từng hồ sơ được kiểm tra bằng **`ImageDocumentPolicy`** và middleware `auth`/`active`. Khu vực quản trị còn có middleware `role:admin`.
 
 ## 1. Vai trò hiện có
 
@@ -42,6 +42,9 @@ Trong luồng upload hiện tại, mỗi `ImageDocument` mới luôn được g�
 | Yêu cầu gửi lại + lý do | Không | Có, chỉ `pending_review` | Không |
 | Quản lý tài khoản/vai trò | Không | Không | Có |
 | Xem audit log | Không | Không | Có |
+| Lịch sử `/my-documents` | Hồ sơ của mình, 10/trang | Không theo seed hiện tại | Không theo seed hiện tại |
+| Xuất PDF | Hồ sơ của mình đủ điều kiện | Không | Không |
+| Xuất CSV quản lý/OCR | Không | Không | Có, cần permission tương ứng |
 | Xem dashboard lỗi / đổi OCR provider | Không | Không | Có |
 
 Khối “toàn bộ nội dung OCR đọc được” trên trang kết quả là danh sách dòng OCR để đối chiếu theo phạm vi hồ sơ; hai khối JSON kỹ thuật chỉ được render khi người dùng có role `admin`.
@@ -69,7 +72,7 @@ upload ảnh mới ──> tạo ImageDocument mới ở processing
 - Upload nhận 1–6 ảnh, tạo một `ImageDocument` cho mỗi ảnh. Xử lý ảnh độc lập; chỉ khi đúng 2 ảnh đều thành công mới gọi bước đối chiếu CCCD riêng.
 - Nếu `matched`, bản ghi mặt trước là hồ sơ chính; mặt sau có `merged_into_document_id` trỏ về mặt trước. Giữ raw OCR/ảnh của từng mặt; lưu dữ liệu ghép trên hồ sơ chính. Kết quả chưa khớp/thiếu bằng chứng vẫn giữ hai hồ sơ riêng.
 - Trang chủ luôn loại mặt phụ khỏi danh sách. Mở route chi tiết mặt phụ vẫn qua Policy rồi mới redirect sang hồ sơ chính. Thao tác sửa/gửi duyệt/xác thực/yêu cầu gửi lại chỉ cho hồ sơ chính; các thay đổi trạng thái review được đồng bộ sang mặt phụ.
-- Sửa OCR nhận chuỗi nullable tối đa 2000 ký tự mỗi field, cập nhật `normalized_value` và dấu vết `manually_edited`, `edited_by`, `edited_at`. CCCD có danh sách field được bổ sung thủ công; các loại khác chỉ sửa field đã tồn tại. Không tự kiểm định ngày/số định danh ở bước sửa và không tự chạy lại bước ghép mặt sau chỉnh sửa. Raw OCR từng ảnh được giữ nguyên.
+- Sửa OCR nhận chuỗi nullable tối đa 2000 ký tự mỗi field, cập nhật `normalized_value` và dấu vết `manually_edited`, `edited_by`, `edited_at`. CCCD, giấy phép lái xe và đăng ký xe có danh sách field được bổ sung thủ công trong `DocumentController::MANUALLY_ADDABLE_FIELDS`, kể cả khi OCR chưa tạo field. Field đã tồn tại dạng object cũng được cập nhật; field lạ không hợp lệ gây validation error thay vì bị bỏ qua và báo thành công. Không tự kiểm định ngày/số định danh ở bước sửa và không tự chạy lại bước ghép mặt sau chỉnh sửa. Raw OCR từng ảnh được giữ nguyên.
 - Barcode chỉ `decoded` nhưng `parsed.status=unsupported` không đủ bằng chứng gộp hồ sơ. Kết quả ghép mặt và nút xác thực của nhân viên là hai bước nghiệp vụ khác nhau; engine không xác thực giấy tờ thật.
 
 ## 5. Permission được seed và điểm kiểm tra quyền
@@ -88,7 +91,7 @@ Seeder cũng tạo các permission như `documents.edit-structured-ocr-any`, `do
 
 ## 6. Admin và audit log
 
-Admin có thể mở trang quản lý tài khoản để gán một role trong danh sách seed và bật/tắt `is_active`. Không thể tự khóa chính tài khoản Admin đang đăng nhập. Policy cho phép Admin mở bất kỳ hồ sơ nào theo ID, nhưng trang danh sách trang chủ chỉ hiển thị tối đa 6 hồ sơ ở các trạng thái `completed`, `pending_review`, `resubmission_required` và `verified`; không liệt kê `processing` hoặc `failed`. Customer thấy tối đa 6 hồ sơ của mình ở sáu trạng thái đã khai báo; Processor/Reviewer chỉ thấy tối đa 6 hồ sơ đang `pending_review`. Hiện chưa có trang lịch sử hồ sơ đầy đủ, phân trang hoặc bộ lọc trên trang chủ. Trang user Admin có phân trang 20 tài khoản, audit log phân trang 30 sự kiện. Admin còn có trang chỉ-đọc `/admin/processing-metrics`, tổng hợp **sự kiện audit xử lý** trong cửa sổ cảnh báo, không đếm trực tiếp status hồ sơ. Sự kiện thành công vẫn được tính sau khi hồ sơ chuyển sang chờ duyệt/đã duyệt. Ảnh bị từ chối (`invalid_image`) và lỗi chưa phân loại được đếm riêng, không đưa vào mẫu số tỷ lệ lỗi hệ thống; trang hiển thị tối đa 10 audit alert. Các lần upload, xử lý, xem ảnh, xem face crop, sửa OCR, gửi xác thực, xác thực, yêu cầu gửi lại và thay đổi quyền được ghi vào bảng `audit_logs`.
+Admin có thể mở trang quản lý tài khoản để gán một role trong danh sách seed và bật/tắt `is_active`. Không thể tự khóa chính tài khoản Admin đang đăng nhập. Policy cho phép Admin mở bất kỳ hồ sơ nào theo ID, nhưng trang danh sách trang chủ chỉ hiển thị tối đa 6 hồ sơ ở các trạng thái `completed`, `pending_review`, `resubmission_required` và `verified`; không liệt kê `processing` hoặc `failed`. Customer thấy tối đa 6 hồ sơ của mình ở sáu trạng thái đã khai báo; Processor/Reviewer chỉ thấy tối đa 6 hồ sơ đang `pending_review`. Customer có `/my-documents` riêng: 10 hồ sơ/trang, lọc sáu trạng thái hoặc `all`, chỉ hồ sơ của mình và loại mặt phụ; trạng thái không hợp lệ trả 404. Bộ lọc này không nằm trong danh sách sáu hồ sơ ở trang chủ. Trang user Admin có phân trang 20 tài khoản, audit log phân trang 30 sự kiện. Admin còn có trang chỉ-đọc `/admin/processing-metrics`, tổng hợp **sự kiện audit xử lý** trong cửa sổ cảnh báo, không đếm trực tiếp status hồ sơ. Sự kiện thành công vẫn được tính sau khi hồ sơ chuyển sang chờ duyệt/đã duyệt. Ảnh bị từ chối (`invalid_image`) và lỗi chưa phân loại được đếm riêng, không đưa vào mẫu số tỷ lệ lỗi hệ thống; trang hiển thị tối đa 10 audit alert. Các lần upload, xử lý, xem ảnh, xem face crop, sửa OCR, gửi xác thực, xác thực, yêu cầu gửi lại và thay đổi quyền được ghi vào bảng `audit_logs`.
 
 Admin đổi OCR provider tại `/admin/ocr-vendor`; chỉ role `admin` vào được cả trang và thao tác PUT. Lựa chọn trong `system_settings` được đồng bộ qua file state để FastAPI đọc, có audit `ocr.provider_updated`; lỗi đồng bộ khiến cập nhật database rollback. Giao diện này không nhận API key và không kiểm tra kết nối vendor khi lưu. Admin không cần khởi động lại service để đổi lựa chọn provider cho các yêu cầu sau.
 
@@ -96,4 +99,12 @@ Admin đổi OCR provider tại `/admin/ocr-vendor`; chỉ role `admin` vào đ�
 
 ## 7. Chức năng chưa có route/UI
 
-Permission hoặc policy method dự phòng không phải chức năng đã triển khai. Hiện chưa có lịch sử hồ sơ phân trang, tìm kiếm/lọc hồ sơ, xóa/lưu trữ hồ sơ thủ công, retry xử lý thủ công, xoay ảnh thủ công hoặc export hồ sơ từ giao diện. Các script xuất OCR trong `ai-engine/` là công cụ CLI riêng. Cấu hình queue của Laravel hiện chưa được dùng để xử lý upload ảnh chạy nền.
+Permission hoặc policy method dự phòng không phải chức năng đã triển khai. Đã có lịch sử phân trang/lọc trạng thái và xuất PDF/CSV. Chưa có tìm kiếm tự do, xóa/lưu trữ hồ sơ thủ công, retry xử lý thủ công hoặc xoay ảnh thủ công. Các script xuất OCR trong `ai-engine/` là công cụ CLI riêng. Cấu hình queue của Laravel hiện chưa được dùng để xử lý upload ảnh chạy nền.
+
+## 8. Quyền xuất báo cáo
+
+- PDF: `GET /documents/{document}/report`, policy `exportReport` phải cho phép. Chỉ chủ hồ sơ có `documents.view-own`, không mang role admin/processor/reviewer, hồ sơ chính chưa purge, trạng thái completed/pending_review/verified/resubmission_required và có ít nhất một normalized value khác rỗng. Controller dùng DomPDF; file `Bao_Cao_Ho_So_{id}.pdf`, audit `document.report_exported`.
+- CSV: route thuộc nhóm `role:admin`. Cả hai loại yêu cầu `documents.export-management-csv`; loại OCR cần thêm `documents.export-ocr-csv`. POST bị giới hạn 5 lần/phút. Hai permission được seed cho Admin, không cho Customer hoặc staff.
+- CSV chỉ xuất hồ sơ chính, tối đa 5.000 hồ sơ. OCR loại hồ sơ processing/failed, đã purge hoặc không có field chuẩn hóa có giá trị. Không có dữ liệu vẫn trả CSV chỉ có header.
+- Bộ lọc ngày dùng `created_at`: bỏ trống cả hai thì không lọc ngày; có from_date thì bắt buộc to_date >= from_date; chỉ to_date thì lấy đến hết ngày đó. Loại giấy tờ lọc bằng đúng giá trị document_type, chưa phân biệt phiên bản CCCD qua card_version.
+- Audit CSV: `admin.management_csv_exported` hoặc `admin.ocr_csv_exported`, lưu loại báo cáo/bộ lọc/số dòng.

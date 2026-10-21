@@ -7,3 +7,48 @@
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
         'Noto Color Emoji';
 }
+
+/* Phân trang hồ sơ của tôi */
+
+/* Nút trang bình thường */
+.document-pagination nav a {
+    background-color: #0f172a !important;
+    color: #cbd5e1 !important;
+    border-color: #334155 !important;
+}
+
+/* Khi rê chuột vào nút */
+.document-pagination nav a:hover {
+    background-color: #1e293b !important;
+    color: #22d3ee !important;
+}
+
+/* Các nút không thể bấm */
+.document-pagination nav span {
+    background-color: #0f172a;
+    color: #94a3b8;
+    border-color: #334155;
+}
+
+/* Trang hiện tại */
+.document-pagination nav [aria-current="page"],
+.document-pagination nav [aria-current="page"] span {
+    background-color: #22d3ee !important;
+    color: #020617 !important;
+    border-color: #22d3ee !important;
+    font-weight: 700;
+}
+
+/* Các góc bo */
+.document-pagination nav a,
+.document-pagination nav span {
+    border-radius: 8px;
+}
+select {
+    background-color: #1e293b;
+    color: #ffffff;
+}
+select option {
+    background-color: #1e293b;
+    color: #ffffff;
+}

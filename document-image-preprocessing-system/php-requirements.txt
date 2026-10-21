@@ -1,8 +1,13 @@
-# Snapshot of all PHP packages installed by Composer.
-# Generated from: composer show --installed
-# For a reproducible install, Composer uses composer.json and composer.lock:
-#   composer install
+# PHP requirements / Composer lock snapshot, updated 2026-10-21.
+# NOT a pip file. Install ALL PHP packages with:
+#   composer install --prefer-dist --no-interaction
+# Check installed PHP extensions with: composer check-platform-reqs
+# PHP >=8.3 (actual platform constraints come from composer.lock).
+# Enable curl, dom, fileinfo, gd, iconv, mbstring, openssl, PDO, session,
+# tokenizer, xml, xmlwriter, zip, and pdo_sqlite OR pdo_mysql.
+# Packages below include production and development dependencies.
 bacon/bacon-qr-code==3.1.1
+barryvdh/laravel-dompdf==3.1.2
 brick/math==1.0.0
 carbonphp/carbon-doctrine-types==3.2.1
 composer/semver==3.5.1
@@ -11,6 +16,9 @@ dflydev/dot-access-data==3.0.3
 doctrine/deprecations==1.1.6
 doctrine/inflector==2.1.0
 doctrine/lexer==3.0.3
+dompdf/dompdf==3.1.6
+dompdf/php-font-lib==1.0.2
+dompdf/php-svg-lib==1.0.2
 dragonmantank/cron-expression==3.6.0
 egulias/email-validator==4.0.4
 fakerphp/faker==1.24.1
@@ -42,6 +50,7 @@ league/flysystem-local==3.35.3
 league/mime-type-detection==1.17.0
 league/uri==7.8.1
 league/uri-interfaces==7.8.1
+masterminds/html5==2.11.0
 mockery/mockery==1.6.15
 monolog/monolog==3.12.1
 myclabs/deep-copy==1.14.0
@@ -77,6 +86,7 @@ psr/simple-cache==3.0.0
 psy/psysh==0.12.24
 ramsey/collection==2.1.1
 ramsey/uuid==4.9.4
+sabberworm/php-css-parser==9.5.0
 sebastian/cli-parser==4.2.1
 sebastian/comparator==7.1.8
 sebastian/complexity==5.0.0

@@ -1,6 +1,6 @@
 # Tích hợp Laravel với AI Engine
 
-Đối chiếu source ngày **17/10/2026**. Laravel quản lý giao diện, tài khoản, quyền và hồ sơ; FastAPI xử lý ảnh/OCR. Các điểm đối chiếu chính: `routes/web.php`, `DocumentController`, `AiImageProcessor`, `SystemSetting`, `ai-engine/app.py`.
+Đối chiếu source ngày **21/10/2026**. Laravel quản lý giao diện, tài khoản, quyền và hồ sơ; FastAPI xử lý ảnh/OCR. Các điểm đối chiếu chính: `routes/web.php`, `DocumentController`, `AiImageProcessor`, `SystemSetting`, `ai-engine/app.py`.
 
 ## 1. Luồng upload và lưu kết quả
 
@@ -78,7 +78,7 @@ AI Engine nhận diện một mặt trước/một mặt sau, đọc số 12 ch�
 | 422 | `needs_review`, `ERR_PAIR_INSUFFICIENT_EVIDENCE` | Thiếu số/MRZ/barcode định danh đủ tin cậy |
 | 422 | `needs_review`, `ERR_PAIR_CONFLICTING_EVIDENCE` | Nguồn định danh mâu thuẫn |
 
-Laravel chỉ gộp sau khi kiểm tra payload thành công đầy đủ. `ocr_raw_data` của từng ảnh vẫn giữ riêng; hồ sơ chính lưu `individual_normalized_ocr`, `paired_normalized_ocr`, `document_sides`, `pairing`, rồi dùng fields ghép để hiển thị. Mặt sau nhận `merged_into_document_id`; trang chủ ẩn mặt phụ, mở chi tiết mặt phụ sẽ chuyển sang hồ sơ chính sau Policy. Lỗi dịch vụ ghép mặt tạo cảnh báo `side_matching_unavailable`, không xóa kết quả OCR đã lưu. Submit/verify/request-resubmission trên hồ sơ chính đồng bộ trạng thái sang các mặt phụ.
+Laravel chỉ gộp sau khi kiểm tra payload thành công đầy đủ. `ocr_raw_data` của từng ảnh vẫn giữ riêng; hồ sơ chính lưu `individual_normalized_ocr`, `paired_normalized_ocr`, `document_sides`, `pairing`, rồi dùng fields ghép để hiển thị. Mặt sau nhận `merged_into_document_id`; trang chủ ẩn mặt phụ, mở chi tiết mặt phụ sẽ chuyển sang hồ sơ chính sau Policy. Trước khi gửi JSON ghép mặt, client khôi phục object rỗng `{}` tại các trường mapping, đặc biệt `barcodes.records[*].parsed.fields`. Lỗi dịch vụ tạo `ERR_PAIR_SERVICE_UNAVAILABLE` / `side_matching_unavailable`; lỗi response tạo `ERR_PAIR_INVALID_RESPONSE` / `side_matching_invalid_response`, exception HTTP có status code. Cả hai giữ OCR đã lưu và không gộp. Submit/verify/request-resubmission trên hồ sơ chính đồng bộ trạng thái sang các mặt phụ.
 
 ## 3. Workspace, đồng thời và timeout
 
@@ -133,6 +133,8 @@ Tất cả route hồ sơ/Admin dưới middleware `auth`, `active`.
 | Method | URL | Route name / kiểm tra |
 | --- | --- | --- |
 | GET | `/` | `documents.create`; tối đa 6 hồ sơ theo vai trò |
+| GET | `/my-documents` | `documents.index`; owner + documents.view-own, 10 hồ sơ/trang, lọc status |
+| GET | `/documents/{document}/report` | `documents.report`; Policy exportReport, tải PDF DomPDF |
 | POST | `/documents` | `documents.store`; Policy create, throttle 10/phút |
 | GET | `/documents/{document}` | `documents.show`; Policy view |
 | GET | `/documents/{document}/original` | `documents.original`; Policy view |
@@ -142,6 +144,8 @@ Tất cả route hồ sơ/Admin dưới middleware `auth`, `active`.
 | POST | `/documents/{document}/submit-review` | `documents.submit-review`; Policy submitForReview |
 | POST | `/documents/{document}/verify` | `documents.verify`; Policy review |
 | POST | `/documents/{document}/request-resubmission` | `documents.request-resubmission`; Policy review |
+| GET | `/admin/exports` | `admin.exports.index`; admin + documents.export-management-csv |
+| POST | `/admin/exports/csv` | `admin.exports.csv`; admin, kiểm tra permission theo loại báo cáo, throttle 5/phút |
 | GET | `/admin/users` | `admin.users`; role admin |
 | PUT | `/admin/users/{user}/access` | `admin.users.access`; role admin |
 | GET | `/admin/audit-logs` | `admin.audit-logs`; role admin |
@@ -149,10 +153,18 @@ Tất cả route hồ sơ/Admin dưới middleware `auth`, `active`.
 | GET | `/admin/ocr-vendor` | `admin.ocr-vendor`; role admin |
 | PUT | `/admin/ocr-vendor` | `admin.ocr-vendor.update`; role admin |
 
-`POST /login/quick/{role}` có throttle 10/phút và controller chỉ hoạt động local/testing. Fortify cung cấp các route auth theo `config/fortify.php`; Laravel còn có health route `/up`. Chưa có route lịch sử hồ sơ phân trang, export, xóa hồ sơ, retry thủ công hoặc xoay ảnh thủ công.
+`POST /login/quick/{role}` có throttle 10/phút và controller chỉ hoạt động local/testing. Fortify cung cấp các route auth theo `config/fortify.php`; Laravel còn có health route `/up`. Đã có lịch sử phân trang, PDF và CSV; chưa có route xóa hồ sơ, retry thủ công hoặc xoay ảnh thủ công.
 
 ## 8. Cấu hình và TLS
 
 Xem `.env.example`, `config/services.php`, `config/documents.php` và [RUN_PROJECT.md](RUN_PROJECT.md) cho cấu hình đầy đủ. Các biến concurrency/provider credential thuộc môi trường tiến trình Uvicorn; Laravel `.env` không tự truyền sang process Uvicorn đang chạy.
 
 Mẫu Nginx production chuyển HTTP sang HTTPS, TLS 1.2/1.3, HSTS, PHP-FPM với timeout 600 giây. `APP_FORCE_HTTPS=true` buộc URL HTTPS; `SESSION_SECURE_COOKIE=true` chỉ gửi cookie qua HTTPS. Có mẫu local mkcert ở `nginx.local-mkcert.conf.example`. Mỗi mẫu giới hạn cả request 12 MiB; phải cân đối proxy timeout, PHP upload/post limits và batch thực tế. Các file mẫu không chứng minh server đã triển khai TLS.
+
+## 9. Sửa dữ liệu chuẩn hóa và xuất báo cáo
+
+`updateStructuredOcr` cho phép bổ sung field thuộc danh sách theo CCCD, bằng lái hoặc đăng ký xe; không chỉ sửa field OCR đã nhận diện. Field hợp lệ được ghi normalized_value và metadata chỉnh sửa vào fields và paired_normalized_ocr.fields khi có. Field không hỗ trợ trả lỗi validation; lưu model thất bại không báo thành công. Form giữ dữ liệu qua old() khi lỗi. Raw OCR và snapshot individual_normalized_ocr không bị sửa; không tự OCR/đối chiếu lại.
+
+PDF dùng dữ liệu tổng hợp nếu pairing.status=matched, còn lại dùng fields của một ảnh. CSV quản lý có ID khách hàng, loại, trạng thái, is_paired và các mốc thời gian. CSV OCR thêm các cột ocr_{field} theo tập tên field có giá trị trong kết quả lọc, sắp tên cột; có BOM UTF-8 và response no-store. Bỏ mặt phụ, giới hạn 5.000 bản ghi, sort theo id. Hai ngày trống được phép; có from_date thì cần to_date >= from_date; to_date riêng được hỗ trợ. So sánh ngày bao gồm hai đầu và dùng created_at theo timezone ứng dụng (config hiện là UTC).
+
+Giới hạn hiện có cần phân biệt với chức năng đã hoàn thiện: documentType() chỉ đọc document_type, chưa dùng card_version; giá trị chưa xác định là `Unknown` trong controller nhưng nhãn view dùng `unknown`; form CSV hiện thiếu @csrf và các select chưa khôi phục old(). Laravel 13 có kiểm tra same-origin trước token nên form có thể hoạt động trên trình duyệt cùng nguồn, nhưng đường kiểm tra token dự phòng có thể trả 419. Code safeCell thay ký tự xuống dòng/tab và thêm một dấu cách trước các tiền tố công thức; không khẳng định cơ chế này bảo đảm an toàn cho mọi phần mềm bảng tính.

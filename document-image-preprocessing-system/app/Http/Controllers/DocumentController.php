@@ -11,6 +11,7 @@ use App\Models\ImageDocument;
 use App\Services\AiImageProcessor;
 use App\Services\EncryptedDocumentStorage;
 use App\Services\ProcessingFailureMonitor;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
@@ -41,6 +43,78 @@ class DocumentController extends Controller
         'issue_date',
         'expiry_date',
     ];
+
+    /** @var array<string, list<string>> */
+    private const MANUALLY_ADDABLE_FIELDS = [
+        'citizen_identity_card' => self::MANUALLY_ADDABLE_CCCD_FIELDS,
+        'driver_license' => [
+            'document_number',
+            'full_name',
+            'date_of_birth',
+            'nationality',
+            'residence',
+            'license_class',
+            'expiry_date',
+        ],
+        'vehicle_registration' => [
+            'owner_name',
+            'vehicle_address',
+            'brand',
+            'model_code',
+            'engine_number',
+            'chassis_number',
+            'paint_color',
+            'operating_scope',
+            'registration_plate',
+            'seating_capacity',
+            'expiry_date',
+            'engine_power',
+            'vehicle_type',
+            'engine_displacement',
+        ],
+    ];
+
+    public function index(Request $request): View
+    {
+        $user = request()->user();
+        // Kiểm tra quyền truy cập của người dùng
+        if (! $user->can('documents.view-own')) {
+            abort(403, 'Bạn không có quyền truy cập vào trang này.');
+        }
+        $statuses = [
+            ImageDocument::STATUS_PROCESSING,
+            ImageDocument::STATUS_COMPLETED,
+            ImageDocument::STATUS_FAILED,
+            ImageDocument::STATUS_PENDING_REVIEW,
+            ImageDocument::STATUS_VERIFIED,
+            ImageDocument::STATUS_RESUBMISSION_REQUIRED,
+        ];
+        $status = $request->query('status', 'all');
+        if ($status !== 'all' && ! in_array($status, $statuses, true)) {
+            abort(404, 'Trạng thái hồ sơ không hợp lệ.');
+        }
+        // truy vấn
+        $query = ImageDocument::query()
+            ->where('user_id', $user->id)
+            ->whereNull('merged_into_document_id');
+
+        if ($status !== 'all') {
+            $query->where('status', $status);
+        }
+        $documents = $query
+            ->latest('id')
+            ->paginate(10)
+            ->withQueryString();
+
+        // relative path for pagination links
+        $documents->withPath('/my-documents');
+
+        return view('documents.index', [
+            'documents' => $documents,
+            'status' => $status,
+        ]);
+
+    }
 
     public function create(): View
     {
@@ -77,26 +151,30 @@ class DocumentController extends Controller
         ]);
     }
 
+    // gọi các service để xử lý hình ảnh và lưu trữ kết quả, đồng thời quản lý các lỗi xảy ra trong quá trình xử lý.
     public function store(
         StoreDocumentRequest $request,
         AiImageProcessor $imageProcessor,
         EncryptedDocumentStorage $documentStorage,
         ProcessingFailureMonitor $failureMonitor,
     ): RedirectResponse {
+        // Lấy hình từ request
         $images = $request->file('images');
         $images = is_array($images) ? $images : [$request->file('image')];
+        // Khởi tạo các mảng để lưu trữ kết quả xử lý thành công,thất bại, kết quả đối chiéu
         $processedDocuments = [];
         $failedDocuments = [];
         $pairingResult = null;
         $documents = [];
         $lastSystemFailure = null;
-
+        // lọc các hình ảnh được tải lên hợp lệ và đánh lại chỉ số cho từng hình ảnh
         $images = array_values(array_filter($images, static fn ($image): bool => $image instanceof UploadedFile));
 
+        // duyệt từng phần tử để tạo dữ liệu trong bảng
         foreach ($images as $index => $image) {
             $documents[$index] = $this->createUploadedDocument($image, $request, $documentStorage);
         }
-
+        // gọi service xử lý hình ảnh(AI-engine) theo điều kiện
         if (count($images) > 1) {
             $outcomes = $imageProcessor->processBatch($images);
         } else {
@@ -139,16 +217,19 @@ class DocumentController extends Controller
                     $processedDocuments[1]->ocr_structured_data,
                 ]);
             } catch (Throwable $exception) {
+                $invalidPairingResponse = $exception instanceof AiEngineResponseException;
                 $pairingResult = [
                     'status' => 'needs_review',
-                    'reason' => 'side_matching_unavailable',
+                    'reason' => $invalidPairingResponse ? 'side_matching_invalid_response' : 'side_matching_unavailable',
                     'error' => [
-                        'code' => 'ERR_PAIR_SERVICE_UNAVAILABLE',
-                        'message' => 'Dịch vụ đối chiếu hai mặt chưa khả dụng. OCR từng ảnh vẫn được lưu; bạn có thể yêu cầu nhân viên kiểm tra.',
+                        'code' => $invalidPairingResponse ? 'ERR_PAIR_INVALID_RESPONSE' : 'ERR_PAIR_SERVICE_UNAVAILABLE',
+                        'message' => $invalidPairingResponse
+                            ? 'Dữ liệu trao đổi với dịch vụ đối chiếu hai mặt không hợp lệ. OCR từng ảnh vẫn được lưu; bạn có thể yêu cầu nhân viên kiểm tra.'
+                            : 'Dịch vụ đối chiếu hai mặt chưa khả dụng. OCR từng ảnh vẫn được lưu; bạn có thể yêu cầu nhân viên kiểm tra.',
                     ],
                 ];
 
-                Log::warning('Document side matching was unavailable.', [
+                Log::warning('Document side matching failed.', [
                     'document_ids' => array_map(
                         static fn (ImageDocument $document): int => $document->id,
                         $processedDocuments,
@@ -262,7 +343,9 @@ class DocumentController extends Controller
         StoreDocumentRequest $request,
         EncryptedDocumentStorage $documentStorage,
     ): ImageDocument {
+        // lưu hình đc tải lên vào storage
         $originalPath = $documentStorage->storeUploadedFile($image, 'documents/originals');
+        // tạo dòng dữ liệu trong bảng ImageDocument
         $document = ImageDocument::query()->create([
             'user_id' => $request->user()->id,
             'original_path' => $originalPath,
@@ -270,6 +353,7 @@ class DocumentController extends Controller
             'expires_at' => now()->addDays(max(1, (int) config('documents.retention_days'))),
             'status' => ImageDocument::STATUS_PROCESSING,
         ]);
+        // ghi audit log cho hành động tải lên tài liệu
         $this->recordAudit('document.uploaded', $document);
 
         return $document;
@@ -344,6 +428,36 @@ class DocumentController extends Controller
         return view('documents.show', ['document' => $document]);
     }
 
+    public function exportReport(ImageDocument $document)
+    {
+        // Check policies hàm exportReport trong ImageDocumentPolicy
+        Gate::authorize('exportReport', $document);
+        // Lấy dữ liệu ocr
+        $structuredData = $document->ocr_structured_data;
+        $is_Paired = data_get($structuredData, 'pairing.status') === 'matched';
+        $fields = $is_Paired
+            ? data_get($structuredData, 'paired_normalized_ocr.fields')
+            : data_get($structuredData, 'fields');
+
+        // Lấy thông tin loại giấy tờ từ dữ liệu OCR
+        $documentInfo = $is_Paired
+            ? data_get($structuredData, 'paired_normalized_ocr.document')
+            : data_get($structuredData, 'document');
+        $currentTimeVN = now()->addHours(7);
+        $pdf = Pdf::loadView('documents.report', [
+            'document' => $document,
+            'fields' => $fields,
+            'documentInfo' => $documentInfo,
+            'isPaired' => $is_Paired,
+            'generatedAt' => $currentTimeVN,
+        ])->setPaper('a4', 'portrait');
+
+        // ghi log audit cho hành động xuất báo cáo`
+        $this->recordAudit('document.report_exported', $document);
+
+        return $pdf->download("Bao_Cao_Ho_So_{$document->id}.pdf");
+    }
+
     public function original(ImageDocument $document, EncryptedDocumentStorage $documentStorage): StreamedResponse
     {
         $this->recordAudit('document.original_viewed', $document);
@@ -384,17 +498,25 @@ class DocumentController extends Controller
             'fields.*' => ['nullable', 'string', 'max:2000'],
         ]);
         $structuredData = $document->ocr_structured_data ?? [];
-        $fields = $structuredData['fields'] ?? [];
+        $fields = is_array($structuredData['fields'] ?? null) ? $structuredData['fields'] : [];
         $pairedFields = data_get($structuredData, 'paired_normalized_ocr.fields');
         $editedAt = now()->toIso8601String();
-        $isCitizenIdentityCard = data_get($structuredData, 'document.document_type') === 'citizen_identity_card'
-            || data_get($structuredData, 'paired_normalized_ocr.document.document_type') === 'citizen_identity_card';
+        $documentType = data_get($structuredData, 'document.document_type')
+            ?? data_get($structuredData, 'paired_normalized_ocr.document.document_type');
+        $manuallyAddableFields = self::MANUALLY_ADDABLE_FIELDS[$documentType] ?? [];
 
         foreach ($validated['fields'] as $fieldName => $value) {
-            $canAddCccdField = $isCitizenIdentityCard
-                && in_array($fieldName, self::MANUALLY_ADDABLE_CCCD_FIELDS, true);
+            $canAddField = in_array($fieldName, $manuallyAddableFields, true);
+            $existsInFields = is_array($fields[$fieldName] ?? null);
+            $existsInPairedFields = is_array($pairedFields) && is_array($pairedFields[$fieldName] ?? null);
 
-            if ((array_key_exists($fieldName, $fields) && is_array($fields[$fieldName])) || $canAddCccdField) {
+            if (! $canAddField && ! $existsInFields && ! $existsInPairedFields) {
+                throw ValidationException::withMessages([
+                    'fields.'.$fieldName => 'Trường dữ liệu không được hỗ trợ cập nhật cho loại giấy tờ này.',
+                ]);
+            }
+
+            if ($existsInFields || $canAddField) {
                 $fields[$fieldName] = $this->manuallyUpdatedField(
                     is_array($fields[$fieldName] ?? null) ? $fields[$fieldName] : [],
                     $fieldName,
@@ -404,8 +526,7 @@ class DocumentController extends Controller
                 );
             }
 
-            if (is_array($pairedFields)
-                && ((array_key_exists($fieldName, $pairedFields) && is_array($pairedFields[$fieldName])) || $canAddCccdField)) {
+            if (is_array($pairedFields) && ($existsInPairedFields || $canAddField)) {
                 $pairedFields[$fieldName] = $this->manuallyUpdatedField(
                     is_array($pairedFields[$fieldName] ?? null) ? $pairedFields[$fieldName] : [],
                     $fieldName,
@@ -422,7 +543,11 @@ class DocumentController extends Controller
             $structuredData['paired_normalized_ocr']['fields'] = $pairedFields;
         }
 
-        $document->update(['ocr_structured_data' => $structuredData]);
+        if (! $document->update(['ocr_structured_data' => $structuredData])) {
+            return back()->withInput()->withErrors([
+                'fields' => 'Không thể lưu dữ liệu chuẩn hóa. Vui lòng thử lại.',
+            ]);
+        }
         $this->recordAudit('document.structured_ocr_updated', $document, [
             'fields' => array_keys($validated['fields']),
         ]);

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminCsvExportController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\QuickLoginController;
 use Illuminate\Support\Facades\Route;
@@ -12,6 +13,10 @@ Route::post('/login/quick/{role}', QuickLoginController::class)
 Route::middleware(['auth', 'active'])->group(function (): void {
     Route::get('/', [DocumentController::class, 'create'])
         ->name('documents.create');
+    // route to show my documents
+    Route::get('/my-documents', [DocumentController::class, 'index'])
+        ->name('documents.index');
+
     Route::post('/documents', [DocumentController::class, 'store'])
         ->middleware('throttle:10,1')
         ->can('create', 'App\\Models\\ImageDocument')
@@ -20,6 +25,10 @@ Route::middleware(['auth', 'active'])->group(function (): void {
     Route::get('/documents/{document}', [DocumentController::class, 'show'])
         ->can('view', 'document')
         ->name('documents.show');
+    Route::get('/documents/{document}/report', [DocumentController::class, 'exportReport'])
+        ->can('exportReport', 'document')
+        ->name('documents.report');
+
     Route::get('/documents/{document}/original', [DocumentController::class, 'original'])
         ->can('view', 'document')
         ->name('documents.original');
@@ -50,5 +59,7 @@ Route::middleware(['auth', 'active'])->group(function (): void {
         Route::get('/processing-metrics', [AdminController::class, 'processingMetrics'])->name('processing-metrics');
         Route::get('/ocr-vendor', [AdminController::class, 'ocrVendor'])->name('ocr-vendor');
         Route::put('/ocr-vendor', [AdminController::class, 'updateOcrVendor'])->name('ocr-vendor.update');
+        Route::get('/exports', [AdminCsvExportController::class, 'index'])->permission('documents.export-management-csv')->name('exports.index');
+        Route::post('/exports/csv', [AdminCsvExportController::class, 'export'])->middleware('throttle:5,1')->name('exports.csv');
     });
 });

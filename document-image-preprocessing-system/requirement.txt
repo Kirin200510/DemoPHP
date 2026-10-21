@@ -1,0 +1,3 @@
+# Entry point requested for installation from the project root.
+# Canonical Python dependency list:
+-r ai-engine/requirements.txt

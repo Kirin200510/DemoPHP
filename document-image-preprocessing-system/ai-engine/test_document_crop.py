@@ -515,7 +515,7 @@ def score_quadrilateral(
 
 
 # =========================================================
-# FIND BEST QUADRILATERAL
+# FIND BEST QUADRILATERAL(tìm ứng viên tốt nhất)
 # =========================================================
 
 def find_best_quadrilateral(
@@ -526,7 +526,7 @@ def find_best_quadrilateral(
     candidates = []
 
     for contour in contours:
-
+        # tính chu vi của contour để loại bỏ các contour quá nhỏ hoặc không hợp lệ
         perimeter = cv2.arcLength(
             contour,
             True
@@ -543,7 +543,7 @@ def find_best_quadrilateral(
             0.02
             * perimeter
         )
-
+        # approxPolyDP: xấp xỉ contour bằng polygon có ít đỉnh hơn
         approx = cv2.approxPolyDP(
             contour,
             epsilon,
@@ -602,30 +602,30 @@ def find_best_quadrilateral(
 # =========================================================
 
 def build_edge_mask(image):
-
+# chuyển ảnh sang màu xám
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY
     )
-
+# làm mờ ảnh để giảm nhiễu
     gray = cv2.GaussianBlur(
         gray,
         (5, 5),
         0
     )
-
+# dùng Canny để phát hiện cạnh dựa trên sự thay đổi cường độ sáng
     edges = cv2.Canny(
         gray,
         40,
         120
     )
 
-    # Nối cạnh bị đứt
+    # Tạo kernel cho phép morphological close để nối các cạnh bị đứt
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
         (7, 7)
     )
-
+    # Áp dụng phép morphological close để nối các cạnh bị đứt
     edges = cv2.morphologyEx(
         edges,
         cv2.MORPH_CLOSE,
@@ -647,7 +647,8 @@ def find_document_by_edges(
     edges = build_edge_mask(
         image
     )
-
+    # tìm đường bao của các cạnh trong ảnh
+    # Chain_APPROX_SIMPLE: chỉ lưu trữ các điểm quan trọng, giảm số lượng điểm trong đường bao
     contours, _ = cv2.findContours(
         edges,
         cv2.RETR_LIST,

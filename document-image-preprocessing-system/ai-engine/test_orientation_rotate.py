@@ -56,7 +56,7 @@ model = DocImgOrientationClassification(
 # =========================
 # 2. Predict orientation
 # =========================
-
+# Xử lý ảnh đầu vào và dự đoán orientation của ảnh
 results = model.predict(
     INPUT_IMAGE,
     batch_size=1,

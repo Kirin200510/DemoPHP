@@ -9,6 +9,7 @@
             <h1 class="text-3xl font-bold tracking-tight text-white">Kết quả xử lý #{{ $document->id }}</h1>
             <p class="text-sm text-slate-400">Tạo lúc {{ $document->created_at->format('H:i · d/m/Y') }}</p>
         </div>
+        
         <span class="w-fit rounded-full px-3 py-1 text-xs font-semibold {{ in_array($document->status, [\App\Models\ImageDocument::STATUS_COMPLETED, \App\Models\ImageDocument::STATUS_VERIFIED], true) ? 'bg-emerald-400/10 text-emerald-300' : ($document->status === \App\Models\ImageDocument::STATUS_PENDING_REVIEW ? 'bg-amber-400/10 text-amber-300' : 'bg-red-400/10 text-red-300') }}">
             {{ match ($document->status) {
                 \App\Models\ImageDocument::STATUS_COMPLETED => 'Đã xử lý',
@@ -19,7 +20,17 @@
             } }}
         </span>
     </div>
+    @can('exportReport', $document)
+        <a href="{{ route('documents.report', $document) }}"
+            class="mt-3 inline-flex items-center gap-2 mb-5 
+                    rounded-xl bg-cyan-400 px-4 py-2
+                    text-sm font-semibold text-slate-950
+                    transition hover:bg-cyan-300">
 
+                <span aria-hidden="true">&#8595;</span>
+                Xuất báo cáo PDF
+        </a>
+    @endcan
     @if ($document->status === \App\Models\ImageDocument::STATUS_RESUBMISSION_REQUIRED && $document->review_notes)
         <div class="mb-6 rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100" role="alert">
             <p class="font-semibold">Lý do yêu cầu gửi lại hồ sơ</p>
@@ -366,7 +377,7 @@
                                     @endphp
                                     <label class="flex flex-col gap-1 text-xs text-slate-400">
                                         {{ $fieldLabel }}
-                                        <input name="fields[{{ $fieldName }}]" value="{{ data_get($editableFieldData, 'normalized_value', data_get($editableFieldData, 'raw_value', '')) }}" class="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-400 focus:ring-2">
+                                        <input name="fields[{{ $fieldName }}]" value="{{ old('fields.'.$fieldName, data_get($editableFieldData, 'normalized_value', data_get($editableFieldData, 'raw_value', ''))) }}" class="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-400 focus:ring-2">
                                     </label>
                                 @endforeach
                             </div>

@@ -26,3 +26,8 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Local Windows launcher environment
+/ai-engine/.venv-windows/
+/ai-engine/.venv-linux/
+/.run-project.lock

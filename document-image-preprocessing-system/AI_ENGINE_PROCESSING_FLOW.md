@@ -1,6 +1,6 @@
 # Luồng xử lý AI Engine
 
-Đối chiếu source ngày **17/10/2026**. Laravel gọi `/process` cho một ảnh hoặc `/process-batch` cho nhiều ảnh. Các bước tiền xử lý trong mỗi job chạy tuần tự; nhiều job có thể chạy đồng thời với workspace riêng. Sau OCR/chuẩn hóa từng ảnh, Laravel chỉ gọi riêng `/document-sides/match` khi upload đúng hai ảnh và cả hai xử lý thành công.
+Đối chiếu source ngày **21/10/2026**. Laravel gọi `/process` cho một ảnh hoặc `/process-batch` cho nhiều ảnh. Các bước tiền xử lý trong mỗi job chạy tuần tự; nhiều job có thể chạy đồng thời với workspace riêng. Sau OCR/chuẩn hóa từng ảnh, Laravel chỉ gọi riêng `/document-sides/match` khi upload đúng hai ảnh và cả hai xử lý thành công.
 
 ## 1. Sơ đồ tổng quát
 
@@ -190,7 +190,7 @@ Mỗi record giữ `format`, `source_stage`, `content_type`, `byte_length`, `sym
 
 - `identity_number_only`: payload văn bản đúng 12 chữ số.
 - `identity_keyed_json`: JSON khóa định danh/nhân thân thuộc danh sách hỗ trợ, kiểm tra trùng khóa và kiểu giá trị.
-- `vn_identity_qr_pipe_7`: **chỉ QRCode**, bảy trường phân cách `|`, kiểm tra số định danh, số cũ tùy chọn, họ tên, ngày sinh, giới tính, nơi cư trú, ngày cấp.
+- `vn_identity_qr_pipe_7`: **chỉ QRCode**, bảy trường phân cách `|`; cho phép thêm các phần **rỗng** ở cuối, không nhận phần bổ sung có nội dung. Kiểm tra số định danh, số cũ tùy chọn, họ tên, ngày sinh, giới tính, nơi cư trú, ngày cấp.
 
 Payload vượt 8192 byte, không UTF-8, cấu trúc lạ hoặc giá trị không hợp lệ trả `parsed.status=unsupported`, fields rỗng. Trạng thái barcode `decoded` chỉ nói rằng đã đọc được ký hiệu; không bảo đảm parse được thông tin cá nhân. Payload PDF417 nhị phân của mẫu CCCD 2016 đang ở nhóm unsupported; chưa có thuật toán chuyển payload này thành số CCCD/họ tên/ngày sinh. Không đánh đồng việc lưu Base64 với giải mã thông tin định danh. CLI chuẩn hóa hiện chỉ truyền ảnh cuối, không tự truyền lại ảnh gốc như API.
 
@@ -199,6 +199,8 @@ Payload vượt 8192 byte, không UTF-8, cấu trúc lạ hoặc giá trị khô
 `document_pairing.py` xác định một mặt trước/một mặt sau từ loại giấy tờ, trường OCR, MRZ và dấu hiệu PDF417; thứ tự hai ảnh có thể đảo. Chỉ chấp nhận cặp khi số 12 chữ số mặt trước khớp MRZ theo vị trí nêu trên hoặc barcode mặt sau thuộc profile đã parse. Kiểm tra thêm các giá trị họ tên/ngày sinh/giới tính khi các nguồn cung cấp chúng. Nguồn định danh mâu thuẫn, không rõ mặt hoặc thiếu dữ liệu đều chặn gộp.
 
 `/document-sides/match` trả 200/`matched` với `matching_method=mrz`, `barcode` hoặc `mrz_and_barcode`. Không khớp trả 400/`ERR_PAIR_MISMATCH`; thiếu bằng chứng/sai mặt/mâu thuẫn nguồn trả 422 với mã nghiệp vụ tương ứng. `build_citizen_identity_card_pair_result()` chỉ dựng dữ liệu ghép sau đối chiếu ở endpoint: ưu tiên giá trị mặt trước, mặt sau/barcode chỉ bổ sung trường còn trống, giữ `source_side`, `source_type` và mọi dòng OCR hai mặt.
+
+Trước khi POST kết quả sang endpoint ghép, `AiImageProcessor::normalizePairingPayload()` khôi phục các trường object rỗng thành `{}` thay vì PHP `[]`, giữ các danh sách là array; schema FastAPI vẫn yêu cầu dictionary. Lỗi phản hồi/HTTP sai được Laravel phân biệt bằng `ERR_PAIR_INVALID_RESPONSE`, tách khỏi lỗi dịch vụ `ERR_PAIR_SERVICE_UNAVAILABLE`.
 
 Laravel chỉ tự gọi bước này khi đúng hai ảnh cùng lượt upload đều completed. Upload 3–6 ảnh chỉ xử lý độc lập, không tự tìm cặp giữa các ảnh. Ghép mặt thành công là kiểm tra nhất quán dữ liệu, không phải xác thực giấy tờ thật. Chi tiết lưu hồ sơ chính/mặt phụ: [LARAVEL_AI_ENGINE_INTEGRATION.md](LARAVEL_AI_ENGINE_INTEGRATION.md).
 

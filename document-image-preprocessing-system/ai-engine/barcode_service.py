@@ -107,6 +107,8 @@ def parse_identity_payload(raw: bytes, barcode_format: str) -> dict:
         profile = "identity_keyed_json"
     elif barcode_format == "QRCode":
         parts = text.split("|")
+        if len(parts) > 7 and all(part == "" for part in parts[7:]):
+            parts = parts[:7]
         if len(parts) != 7 or not re.fullmatch(r"[0-9]{12}", parts[0]):
             return unknown
         if parts[1] and not re.fullmatch(r"[0-9]{9}|[0-9]{12}", parts[1]):

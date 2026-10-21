@@ -73,6 +73,12 @@
             <div>
                 <h2 class="text-xl font-semibold text-white">@role('admin') Hồ sơ gần đây @else @role('processor|reviewer') Hàng đợi hồ sơ cần xác thực @else Hồ sơ của tôi @endrole @endrole</h2>
                 <p class="mt-1 text-sm text-slate-400">@role('admin') Chọn hồ sơ để xem thông tin, admin không thực hiện thao tác xử lý. @else @role('processor|reviewer') Mở hồ sơ để xác thực hoặc yêu cầu khách hàng gửi lại kèm lý do. @else Theo dõi tiến trình xử lý, xác thực và xem lại hồ sơ của bạn tại đây. @endrole @endrole</p>
+                @can('documents.view-own')
+                    <a href="{{ route('documents.index') }}"
+                    class="mt-3 inline-flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-400/20">
+                        Xem tất cả hồ sơ của tôi<span aria-hidden="true">-></span>
+                    </a>
+                @endcan
             </div>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 @foreach ($recentDocuments as $recentDocument)
