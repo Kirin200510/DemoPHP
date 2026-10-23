@@ -21,7 +21,7 @@ class BookController {
                     } elseif(!ctype_digit($id)) {
                         $error='ID phải là một số nguyên dương.';
                     } else {
-                        $id=(int)$id;
+                        $id=ltrim($id,'0');
                         $validateId=filter_var(
                             $id,
                             FILTER_VALIDATE_INT,
@@ -46,7 +46,7 @@ class BookController {
                     }
                 } elseif ($book['status']==='available') {
                     $result=$db->updateBook($book['id'],$book['status'],'reserved');
-                    if ($result>0) {
+                    if ($stmt>0) {
                         $success = 'Book đã được đặt trước thành công.';
                         $book['status'] = 'reserved';
                     } else {
