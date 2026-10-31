@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Book Search</title>
+    </head>
+    <body>
+        <h1>Book Search</h1>
+        <form method="post">
+            <label for="book_id">
+                ID:
+            </label>
+            <input type="text" name="book_id" id="book_id" value="{{book.id if book.id else ''}}">
+            <button type="submit">Search</button>
+        </form>
+        {%if error != ""%}
+            <script> alert({{error|tojson}})</script>
+        {%endif%}
+        {%if success!=""%}
+            <script>alert({{success|tojson}})</script>
+        {%endif%}
+        {%if book %}
+        <h2>Book Detail</h2>
+        <p>ID: {{book.id}}</p>
+        <p>Title: {{book.title}}</p>
+        <p>Status: {{book.status}}</p>
+            {%if book.status=='available'%}
+                <form method="post">
+                    <input type="hidden" name="book_id" value="{{book.id}}">
+                    <input type="hidden" name="action" value="update_status">
+                    <button type="submit">Update status</button>
+                </form>
+            {%endif%}
+        {%endif%}
+    </body>
+</html>
