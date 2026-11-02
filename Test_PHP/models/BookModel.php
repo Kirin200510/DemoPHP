@@ -3,14 +3,13 @@ class DB {
     private $pdo;
     public function __construct() {
         $host='localhost';
-        $user='';
-        $pass='';
-        $db='php_test';
+        $user='root';
+        $pass='123';
+        $db='DB';
         $charset='utf8mb4';
         $dsn= "mysql:host=$host;dbname=$db;charset=$charset";
         $this->pdo=new PDO($dsn,$user, $pass);
-        $this->pdo->setAttribute(PDO::ERRMODE_EXCEPTION,PDO::ATTR_ERRMODE);
-        
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     }
     public function getBook($id) {
         $sql="SELECT * from books where id=:id";

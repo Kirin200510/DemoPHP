@@ -12,7 +12,7 @@ class BookController:
         try: 
             db=DB()
             if request.method=='POST':
-                book_id=request.method.get('book_id')
+                book_id=request.form.get('book_id')
                 if book_id==None:
                     error="Please require ID"
                 else:
@@ -31,7 +31,7 @@ class BookController:
                             if book is None:
                                 error="Book not found"
             action=None
-            action=request.method.get('action')
+            action=request.form.get('action')
             if action=='update_status':
                 if book is None:
                     if error=="":
@@ -60,5 +60,5 @@ class BookController:
         finally:
             if db:
                 db.close()
-        render_template('book.html',success=success,error=error,book=book,book_id=book_id)
+        return render_template('book.html',success=success,error=error,book=book,book_id=book_id)
 

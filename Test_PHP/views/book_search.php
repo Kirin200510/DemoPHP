@@ -15,10 +15,10 @@ function h($string) {
             <button type="submit">Search</button>
         </form>
         <?php if ($error!==""): ?>
-            <script>alert(json_encode($error,JSON_HEX_TAG| JSON_HEX_AMP|JSON_HEX_QUOT|JSON_HEX_APOS))</script>
+            <script>alert(<?=json_encode($error,JSON_HEX_TAG| JSON_HEX_AMP|JSON_HEX_QUOT|JSON_HEX_APOS)?>)</script>
         <?php endif?>
         <?php if ($success!== ""): ?>
-            <script>alert(json_encode($success,JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_TAG))</script>
+            <script>alert(<?=json_encode($success,JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_TAG)?>)</script>
         <?php endif ?>
         <?php if ($book): ?>
             <h2>Book Details</h2>
