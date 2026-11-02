@@ -1,0 +1,93 @@
+<?php
+function db() {
+    $pdo = new PDO('mysql:host=127.0.0.1;dbname=php_test;charset=utf8mb4', 'root', '123');
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    return $pdo;
+}
+
+function castVote($pdo, $optionId) {
+    $sql = "UPDATE poll_options SET votes = votes + 1 WHERE id = $optionId";
+    return pdo->exec(sql);
+}
+
+function getOptions($pdo) {
+    $stmt = $pdo->query("SELECT id, label, votes FROM poll_options ORDER BY id");
+    return $stmt->fetchAll();
+}
+
+$pdo = db();
+$error = '';
+success='';if(_SERVER['REQUEST_METHOD'] === 'POST') {
+    $optionId = $_POST['option_id'] ?? '';
+    if ($optionId === '') {
+        $error = 'Vui lòng chọn 1 lựa chọn.';
+    } else {
+        castVote($pdo, $optionId);
+        $success = 'Đã ghi nhận lượt bình chọn.';
+    }
+}
+
+options=getOptions(pdo);
+?>
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Bình chọn</h1>
+<form method="post">
+<?php foreach ($options as $opt): ?>
+    <label><input type="radio" name="option_id" value="<?= $opt['id'] ?>"> <?= opt['label']?></label><br><?phpendforeach;?><buttontype="submit">Bìnhchọn</button></form><?phpif(error) echo "<p>error</p>";?><?phpif(success) echo "<p>$success</p>"; ?>
+</body>
+</html>
+
+Tìm tối thiểu 3 lỗi (không nói trước số lượng/loại lỗi), với mỗi lỗi ghi rõ: dòng nào, lỗi gì, hậu quả nếu không sửa, và sửa như thế nào.
+1. Dòng success='' lỗi vì không phải là biến, lỗi cú pháp nên khai báo không hợp lệ, nếu không sửa thì việc khai báo biến success không thành công, bổ sung dấu $ mới hợp lệ 
+2. Dòng options=getOptions(pdo) cũng không gán giá trị trả về của hàm vô option vì sai cú pháp không phải là biến để lưu trữ dữ liệu hàm getOptions, bổ sung thêm dấu $ trước options, đồng thời truyền tham số  pdo vào hàm getOption cũng thiếu dấu $ nên cũng không có dữ liệu của tham số pdo
+3. Dòng if(_SERVER['REQUEST_METHOD']==='POST') lỗi sai cú pháp nên khi hệ thống có gửi request có phương thức post thì server cũng không nhận được, bổ  sung thêm dấu $ trước _SERVER..
+4. Dòng <?=opt['label']?> lỗi cú pháp, nếu không sửa thì hệ thống không xác định được biến để hiển thị dữ liệu, bổ sung thêm dấu $ ->$opt['label']
+5. Dòng <?phpendforeach;?> lỗi cú pháp ghi dinh liền nhau, nếu không sửa thì trang web bị lỗi không truy cập được, bổ sung thêm dấu cách giữa -> <?php endforeach;?>
+6. Dòng <buttontype = 'submit'> lỗi cú pháp ghi dính liền nhau. Nếu không sửa thì không hiển thị đươc nút submit để gửi lựa chọn, bổ sung thêm dấu cách -> <button type='submit'>
+7. Dòng <error)echo "<p>error</p>";?> lỗi cú pháp thông báo lỗi, nếu không sửa hệ thống không hiển thị dữ liệu thông báo lỗi ra giao diện, sửa-> <?php if ($error): echo "<p>$error</p>";endif;?>
+8. Dòng <?phpif(success) echo "<p>$success</p>";?> lỗi cú pháp thiếu dấu cách ,thiếu dấu $, không có endif, nếu không sửa thì khi có thông báo success giao diện sẽ không hiển thị nội dung thông báo tương ứng, sửa bằng cách-> <?php if($success): echo "<p>$success</p>"; endif;?>
+9. Dòng return pdo->exec(sql); lỗi cú pháp thiếu dấu $ trước pdo và sql, nếu không sửa PHP không thể thực hiện câu lệnh update, cách sửa -> return $pdo->exec($sql);
+10. Dòng $sql = "UPDATE poll_options SET votes = votes + 1 WHERE id = $optionId"; lỗi về SQLInjection, nếu không sửa thì người dùng có thể gửi dữ liệu mã độc chèn vào trong $option_id
+, cách sửa  $sql = "UPDATE poll_options SET votes = votes + 1 WHERE id = :id"; $stmt=$pdo->prepare($sql); $stmt->execute([':id'=>$optionId]);
+11.Dòng if($option==='') {...} else {...} vẫn còn thiếu trường hợp validate và kiểm tra kiểu dữ liệu đồng thời chưa có tình huống kiểm tra dữ liệu có cập nhật thành công hay chưa , nếu không sửa thì xảy ra trường hợp người dùng gửi option_id là abc, -1, v.v gây lỗĩ không truy vấn được khi gọi hàm castVote(); nếu không bô sung thêm kiểm tra dữ liệu cập nhật thì nếu dữ liệu cập nhật không thành công nhưng chạy xong hàm castVote thì luôn luôn thông báo success
+cách sửa-> 
+$optionId=$_POST['option_id']??null;
+if ($optionId === null) {
+    $error = 'Vui lòng chọn 1 lựa chọn.';
+} elseif(!is_string($optionId)){
+    $error='Vui lòng nhập đúng kiểu dl';
+}else {
+    $optionId=trim($optionId);
+    if($optionId==='') {
+        $error="Chuỗi rỗng vui lòng nhập lại";
+    }elseif(!ctype_digit($optionId)) {
+        $error="Id phải là chuỗi số";
+    } else {
+        $optionId=ltrim($optionId,'0');
+        $validateId=filter_var($optionId,FILTER_VALIDATE_INT,["options"=>["min_range"=>1]]);
+        if ($validate===false) {
+            $error="Id từ 1 trở lên";
+        } else {
+            $optionId=(int) $optionId;
+            $result=castVote($pdo, $optionId);
+            if($result>0) {
+                $success="Cập nhật thành công";
+            } else {
+                $error="Cập nhật thất bại";
+            }
+        }
+    }
+}
+12.Dòng <?= $opt['id'] ?> , <?= opt['label']?> , echo "<p>$success</p>" , echo "<p>$error</p>" lỗi bảo mật XSS, thiêú escape output, nếu không sửa thì hệ thống sẽ bị chèn mã độc script và mã độc đó sẽ được thực thi trên hệ thống gây mất an toàn dữ liệu, cách sửa dùng htmlspecialchar() -> ví dụ htmlspecialchar($error, ENT_QUOTES,'UTF-8')
+13. Dòng $pdo=db() lỗi không bắt ngoại lệ, nếu không sửa thì khi cấu hình PDO không chính xác hệ thống bị lỗi không thông báo kết quả gì, không xác định được lỗi cụ thể, sửa bằng cách try catch lồng code PHP
+-> try {
+    $pdo=db();
+    .....
+    $options=getOptions($pdo);
+} catch (PDOException $e) {
+    error_log("Database error:". $e->getMessage());
+    $error="DB connection error";
+}
+14. Thiếu thẻ đóng của form (</form>) sẽ ảnh hưởng khi toàn bộ trang web chứa toàn bộ nội dung dữ liệu không liên quan của trang web được gửi lên khi submit
