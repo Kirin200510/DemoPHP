@@ -1,0 +1,17 @@
+<html>
+    <head>
+        Convert to Can Chi
+    </head>
+    <body>
+        <form method="post">
+            <input type="text" name="year" value="{{year if year else ''}}">
+            <button type="submit">Convert</button>
+        </form>
+            {%if error!=""%}
+                <script>alert({{error|tojson}})</script>
+            {%endif%}
+        {%if result%}
+        <p>Ket qua chuyen doi {{result}}</p>
+        {%endif%}
+    </body>
+</html>
