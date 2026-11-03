@@ -24,7 +24,7 @@ def index():
         else:
             year=year.lstrip('0')
             if year=="" or len(year)>len(str(sys.maxsize)) or (len(year)==len(str(sys.maxsize)) and year>str(sys.maxsize)):
-                error = "Nam khong hop le"
+                error = "Nam > 0 va be hon so lon nhat he thong"
             else:
                 year=int(year)
                 result = convertToCanChi(year)
