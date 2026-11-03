@@ -1,0 +1,8 @@
+1.Tại sao cần sử dụng phép chia lấy dư để tính Can và Chi?
+=> Vì quy luật năm Can-Chi tuần hoàn giữa bội số 10 và 12 nên sau mỗi 10  thiên can hay 12 địa chi sẽ lặp laị từ đầu nên dùng phép chia lấy dư để xác định thiên can và địa chi
+2.Tại sao cần sử dụng Array/List thay vì viết nhiều câu điều kiện if/else?
+=> Sử dụng Array/List giúp việc sau khi chia lấy dư từ đó có đc vị trí, suy ra lấy được tên can-chi của vị trí đó, tránh dùng if-else vì dùng sẽ làm code phức tạp hơn quá nhiều if-else để xét giá trị đó có tên can-chi nào
+3. Nếu muốn chuyển đổi danh sách 100 năm liên tiếp thì em sẽ xử lý như thế nào?
+=> Em sẽ làm vòng lặp đi qua từng năm với từng năm thì tính năm Can-Chi và lưu vào mảng để lưu trữ thông tin 100 năm Can chi 
+4. Nếu danh sách Can hoặc Chi thay đổi thì cần chỉnh sửa những phần nào?
+=> Nếu ds thay đổi thì cập nhật mảng khai báo các giá trị Can-Chi, hoặc cập nhật cách tính toán vị trí của các phần tử Can-Chi
