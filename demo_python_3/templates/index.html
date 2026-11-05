@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Order Statistics</title>
+    </head> 
+    <body>
+        <h1>Order Statistics</h1>
+        <p>Welcome to the Order Statistics page. Here you can view and analyze your order data.</p>
+        <form method="post">
+            <h1> Nhập danh sách đơn hàng </h1>
+            <textarea name="input" rows="10" cols="50">{{input if input else ''}}</textarea>
+            <button type="submit">Thống kê</button>
+        </form>
+        <form method ="post">
+            <h1> Lọc đơn hàng theo trạng thái </h1>
+            <input type="hidden" name="input" value="{{input if input else ''}}">
+            <input type="hidden" name="sort" value="{{sort if sort else 'all'}}">
+            <select name="status">
+                <option value="all" {% if status == 'all' %}selected{% endif %}>Tất cả</option>
+                <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+                <option value="processing" {% if status == 'processing' %}selected{% endif %}>Processing</option>
+                <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+                <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+            </select>
+            <button type="submit">Lọc</button>
+        </form>
+        <form method="post">
+            <h1> Sắp xếp đơn hàng theo giá trị </h1>
+            <input type="hidden" name="input" value="{{input if input else ''}}">
+            <input type="hidden" name="status" value="{{status if status else 'all'}}">
+            <select name="sort">
+                <option value="all" {% if sort == 'all' %}selected{% endif %}>Không sắp xếp</option>
+                <option value="asc" {% if sort == 'asc' %}selected{% endif %}>Tăng dần</option>
+                <option value="desc" {% if sort == 'desc' %}selected{% endif %}>Giảm dần</option>
+            </select>
+            <button type="submit">Sắp xếp</button>
+        </form>
+        {% if orders %}
+            <h2>Danh sách đơn hàng</h2>
+            <table border="1">
+                <tr>
+                    <th>ID</th>
+                    <th>Customer</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                </tr>
+                {% for order in orders %}
+                    <tr>
+                        <td>{{ order['order_id'] }}</td>
+                        <td>{{ order['customer_name'] }}</td>        
+                        <td>{{ order['amount'] }}</td>
+                        <td>{{ order['status'] }}</td>
+                    </tr>
+                {% endfor %}
+            </table>
+        {% endif %}
+        {%if error!=""%}
+            <script>
+                alert({{ error|tojson }});
+            </script>
+        {% endif %}
+        {%if results%} 
+            <h2>Kết quả thống kê</h2>
+            <p>Tổng số đơn hàng: {{ results['totalOrders'] }}</p>
+            <p>Tổng giá trị đơn hàng: {{ results['totalAmount'] }}</p>
+            <p>Đơn hàng theo trạng thái:</p>
+            <ul>
+                <li>Pending: {{ results['statusPending'] }}</li>
+                <li>Processing: {{ results['statusProcessing'] }}</li>
+                <li>Completed: {{ results['statusCompleted'] }}</li>
+                <li>Cancelled: {{ results['statusCancelled'] }}</li>
+            </ul>
+            <p> Tổng giá trị đơn đã hoàn thành: {{ results['totalAmountComplete'] }}</p>
+            <p> Đơn hàng có giá trị cao nhất: {{ results['maxAmountOrder'] }}</p>
+        {% endif %}
+        {% if secondMaxOrder %}
+            <p> Đơn hàng có giá trị cao thứ hai: {{ secondMaxOrder[0]['order_id'] }} - {{ secondMaxOrder[0]['amount'] }}</p>
+        {% endif %}
+        {% if typeCustomers %}
+            <h2>Phân loại khách hàng</h2>
+            <ul>
+                {% for customer_name, type in typeCustomers.items() %}
+                    <li>Tên khách hàng: {{ customer_name }} - Loại: {{ type }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </body>
+</html>
