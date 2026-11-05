@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Convert Can Chi</title>
+</head>
+<body>
+    <h1>Convert Can Chi</h1>
+    <form method="post">
+        <label for="input">Enter Year:</label>
+        <input type="text" id="input" name="input" required value="{{input if input else ''}}">
+        <label for="nam">Nhập năm tìm Can chi trùng:</label>
+        <input type="text" id="nam" name="nam" required value="{{nam if nam else ''}}">
+        <button type="submit">Convert</button>
+    </form>
+    {% if error!="" %}
+        <script>alert({{ error|tojson}});</script>
+    {% endif %}
+    {% if results %}
+        <h2>Kết quả chuyển đổi:</h2>
+        <ul>
+            {% for result in results %}
+                <li>{{ result.year }} - {{ result.can_chi }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    {% if statistic %}
+        <h2>Thống kê:</h2>
+        <ul>
+            <li>Tổng số năm: {{ statistic.total_years }}</li>
+            <li>Số năm duy nhất: {{ statistic.unique_years }}</li>
+            <li> Số năm trùng: {{ statistic.duplicate_years }}</li>
+        </ul>
+    {% endif %}
+    {% if sameCanChiYears %}
+        <h2>Năm có cùng Can Chi:</h2>
+        <ul>
+            {% for year in sameCanChiYears %}
+                <li>{{ year }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</body>
+</html>
