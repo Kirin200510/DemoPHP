@@ -1,0 +1,174 @@
+<html>
+<head>
+    <title>Order Advance</title>
+</head>
+<body>
+    <h1>Order Advance</h1>
+    <p>Danh sách đơn hàng</p>   
+    <table>
+        <thead>
+            <tr>
+                <th>Order ID</th>
+                <th>Customer Name</th>
+                <th>Amount</th>
+                <th>status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr>
+                <td>{{ order.order_id }}</td>
+                <td>{{ order.customer_name }}</td>
+                <td>{{ order.amount }}</td>
+                <td>{{ order.status }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if error !="" %}
+        <script>alert({{ error |tojson}})</script>
+    {% endif %}
+    {% if message !="" %}
+        <script>alert({{ message |tojson}})</script>
+    {% endif %}
+    <form method="POST">
+        <label for="input">Add Order</label>
+        <textarea name="input">{{input1 if input1 else ""}}</textarea> 
+        <button type="submit" name="Add">Add</button>
+    </form>
+    <form method="POST">
+        <h2>Filter Orders</h2>
+        <label for="customer_name">Filter by Customer Name:</label>
+        <input type="text" name="customer_name" id="customer_name" value="{{ customer_name if customer_name else '' }}">
+    </br>
+        <label for="status" >Filter by Status:</label>
+        <select name="status" id="status">
+            <option value="all" {% if status == 'all' %}selected{% endif %}>Tất cả</option>
+            <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="processing" {% if status == 'processing' %}selected{% endif %}>Processing</option>
+            <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+            <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+        </select>
+        </br>
+        <label for="min_amount">Filter by Amount:</label>
+        <input type="number" name="min_amount" id="min_amount" placeholder="Min Amount" value="{{ min_amount if min_amount else '' }}">
+        <input type="number" name="max_amount" id="max_amount" placeholder="Max Amount" value="{{ max_amount if max_amount else '' }}">
+        <button type="submit" name="filter">Filter</button>
+    </form>
+    <form method="POST">
+        <h2>Sort Orders</h2>
+        <label for="sort">Sort by:</label>
+        <select name="sort" id="sort">
+            <option value="all" {% if sort == 'all' %}selected{% endif %}>Không sắp xếp</option>
+            <option value="asc" {% if sort == 'asc' %}selected{% endif %}>Tăng dần</option>
+            <option value="desc" {% if sort == 'desc' %}selected{% endif %}>Giảm dần</option>
+        </select>
+        <button type="submit" >Sort</button>
+    </form>
+    {% if statistics is not none %}
+        <h2>Thống kê</h2>
+        <p>Tổng số đơn hàng: {{ statisticstotal_orders }}</p>
+        <p>Tổng giá trị tất cả đơn hàng: {{ statisticstotal_amount }}</p>
+        <p>Số lượng đơn hàng theo trạng thái:</p>
+        <ul>
+            <li>Pending: {{ statistics.pending_count }}</li>
+            <li>Processing: {{ statistics.processing_count }}</li>
+            <li>Completed: {{ statistics.completed_count }}</li>
+            <li>Cancelled: {{ statistics.cancelled_count }}</li>
+        </ul>
+        <p>Doanh thu thực tế: {{ statistics.revenue }}</p>
+        <p> Tỷ lệ đơn hàng theo trạng thái:</p>
+        <ul>
+            <li>Pending: {{ statistics.percentage_statuses.pending }}%</li>
+            <li>Processing: {{ statistics.percentage_statuses.processing }}%</li>
+            <li>Completed: {{ statistics.percentage_statuses.completed }}%</li>
+            <li>Cancelled: {{ statistics.percentage_statuses.cancelled }}%</li>
+        </ul>
+    {% endif %}
+    {% if statisticCustomer is not none %}
+        <h2>Thống kê theo khách hàng</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tên Khách Hàng</th>
+                    <th>Tổng số đơn hàng</th>
+                    <th>Đơn hoàn thành</th>
+                    <th>Đơn hủy</th>
+                    <th>Tổng doanh thu</th>
+                    <th>Phân loại</th>
+                    <th>Tỷ lệ hủy</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for name,customer in statisticCustomer.items() %}
+                <tr>
+                    <td>{{ name}}</td>
+                    <td>{{ customer.total_orders }}</td>
+                    <td>{{ customer.complete_orders }}</td>
+                    <td>{{ customer.cancelled_orders }}</td>
+                    <td>{{ customer.revenue }}</td>
+                    <td>{{ customer.classification}}</td>
+                    <td>{{ customer.percent_cancelled }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    {% if maxPercentCancelledCustomer is not none %}
+        <h2>Khách hàng có tỷ lệ hủy đơn hàng cao nhất</h2>
+        {% for customer in maxPercentCancelledCustomer[0] %}
+            <p>Tên khách hàng: {{ customer }}</p>
+        {% endfor %}
+        <p>Tỷ lệ hủy đơn hàng: {{ maxPercentCancelledCustomer[1] }}%</p>
+    {% endif %}
+    {% if topRevenueCustomers is not none %}
+        <h2>Top 3 khách hàng có doanh thu cao nhất</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tên khách hàng</th>
+                    <th>Tổng doanh thu</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for customer in topRevenueCustomers %}
+                <tr>
+                    <td>{{ customer }}</td>
+                    <td>{{ topRevenueCustomers[customer] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    {% if topAmountOrders is not none %}
+        <h2>Top 3 đơn hàng có giá trị cao nhất</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Mã đơn hàng</th>
+                    <th>Tên khách hàng</th>
+                    <th>Giá trị</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for customer in topAmountOrders %}
+                <tr>
+                    <td>{{ customer.order_id }}</td>
+                    <td>{{ customer.customer_name }}</td>
+                    <td>{{ customer.amount }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    {% if abnormalOrders is not none %}
+        <h2>Kết quả bất thường</h2>
+        <p>Khách hàng có 2 đơn hàng bị hủy trở lên: {{abnormalOrders.customer_cancelled_two_orders.keys()|join(', ') if abnormalOrders.customer_cancelled_two_orders else 'Không có'}}</p>
+        <p>Đơn hàng có giá trị lớn hơn 3tr: {{abnormalOrders.order_amount_over_3M.keys()|join(', ') if abnormalOrders.order_amount_over_3M else 'Không có'}}</p>
+        <p> Mã đơn hàng bị trùng lặp:</p>
+        {% for order_id in abnormalOrders.duplicate_order_ids %}
+            <p>{{ order_id }}</p>
+        {% endfor %}
+    {% endif %}
+</body>
+</html>

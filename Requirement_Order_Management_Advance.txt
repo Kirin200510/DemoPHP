@@ -1,0 +1,12 @@
+1.Vì sao doanh thu chỉ tính từ đơn hàng completed?
+=>Vì khi đơn hàng hoàn thành lúc này việc đơn hàng đã hoàn tất và toàn bộ tiền đã được thanh toán nên mới có doanh thu
+Nếu một khách hàng có 100 đơn hàng thì cách gom nhóm hiện tại có đáp ứng được không?
+=>Em nghĩ là có thể vì có hàm groupOrderByCustomer có thể làm được
+Nếu mã đơn hàng bị trùng, bạn sẽ xử lý như thế nào?
+=> Em vẫn cho phép tạo ,hiển thị và sẽ thông báo ở phần kết quả bất thường về  danh sách mã đơn hàng bị trùng
+Nếu cần thêm trạng thái refunded, bạn phải thay đổi những phần nào?
+=> Em thay đổi phần filter, thống kê tổng quan bổ sung thêm đếm đơn trạng thái mới, tính lại tỷ lệ đơn theo trạng thái
+Nếu dữ liệu tăng lên 100.000 đơn hàng, bạn nghĩ chương trình hiện tại có vấn đề gì về hiệu năng?
+=> Em nghĩ hỉệu năng giảm ở các chức năng tính toán thống kê, tính toán top 3 đơn ,top 3 doanh thu, v.v
+Nếu cần lưu dữ liệu sau khi đóng trình duyệt hoặc tắt chương trình, bạn sẽ thay đổi kiến trúc như thế nào?
+=> Em sẽ bổ sung hệ thống CSDL đễ lưu trữ dữ liệu sau khi đóng trình duyệt hoặc tắt chương trình
