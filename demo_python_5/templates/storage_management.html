@@ -1,0 +1,223 @@
+<html>
+    <head>
+        <title>Storage Management</title>
+    </head>
+    <body>
+        <h1>Storage Management</h1>
+        <h2>Danh sách sản phẩm</h2>
+        <table>
+            <tr>
+                <th>Mã sản phẩm</th>
+                <th>Tên sản phẩm</th>
+                <th>Giá (VNĐ)</th>
+                <th>Số lượng tồn kho ban đầu</th>
+                <th>Số lượng tồn kho hiện tại</th>
+                <th>Ngưỡng tối thiểu</th>
+                <th>Trạng thái tồn kho</th>
+            </tr>
+            {% for product in products %}
+            <tr>
+                <td>{{ product.product_id }}</td>
+                <td>{{ product.product_name }}</td>
+                <td>{{ product.unit_price }}</td>
+                <td>{{ product.quantity }}</td>
+                <td>{{ product.current_quantity }}</td>
+                <td>{{ product.min_stock }}</td>
+                <td>{{ product.status }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% if error != "" %}
+          <script>alert({{ error|tojson }});</script>
+        {% endif %}
+        {% if message != "" %}
+          <script>alert({{ message|tojson }});</script>
+        {% endif %}
+        <!-- Quản lý nhập xuất kho -->
+        <h2>Quản lý nhập xuất kho</h2>
+        <form method="POST">
+            <label for="input">Nhập xuất kho</label>
+            <textarea id="input" name="input" rows="3" cols="30"></textarea>
+        <br>
+            <select name="type">
+                <option value="import">Nhập kho</option>
+                <option value="export">Xuất kho</option>
+            </select>
+            <br>
+            <button type="submit" name="process">Xử lý</button>
+        </form>
+        <!-- Lọc và sắp xếp(để sau) -->
+         <h2>Lọc và sắp xếp sản phẩm</h2>
+        <form method="POST">
+            <label for="product_id">Mã sản phẩm:</label>
+            <input type="text" id="product_id" name="product_id" value="{{ productId if productId else '' }}">
+            </br>
+            <label for="product_name">Tên sản phẩm:</label>
+            <input type="text" id="product_name" name="product_name" value="{{ productName if productName else '' }}">
+            </br>
+            <label for="status">Trạng thái tồn kho:</label>
+            <select name="status" id="status">
+                <option value="all" {% if status == 'all' %}selected{% endif %}>Tất cả</option>
+                <option value="In Stock" {% if status == 'In Stock' %}selected{% endif %}>In Stock</option>
+                <option value="Low Stock" {% if status == 'Low Stock' %}selected{% endif %}>Low Stock</option>
+            </select>
+            </br>
+            <label for="sort">Sắp xếp theo:</label>
+            <select name="sort" id="sort"> 
+                <option value="all" {% if sort == 'all' %}selected{% endif %}>Không sắp xếp</option>
+                <option value="asc" {% if sort == 'asc' %}selected{% endif %}>Tăng dần</option>
+                <option value="desc" {% if sort == 'desc' %}selected{% endif %}>Giảm dần</option>
+            </select>
+            </br>
+            <label for="type_sort">Loại sắp xếp:</label>
+            <select name="type_sort" id="type_sort">
+                <option value="quantity" {% if typeSort == 'quantity' %}selected{% endif %}>Số lượng tồn kho</option>
+                <option value="value_stock" {% if typeSort == 'value_stock' %}selected{% endif %}>Giá trị tồn kho</option>
+            </select>
+            <button type="submit" name="filter">Lọc và sắp xếp</button>
+        </form> 
+
+
+        <h2>Số lượng tồn kho sau giao dịch</h2>
+        <table>
+            <tr>
+                <th>Mã sản phẩm</th>
+                <th>Tồn ban đầu</th>
+                <th>Tổng nhập</th>
+                <th>Tổng xuất</th>
+                <th>Tồn hiện tại</th>
+            </tr>
+            {% for product in calculateStock %}
+            <tr>
+                <td>{{ product.product_id }}</td>
+                <td>{{ product.quantity }}</td>
+                <td>{{ product.total_import }}</td>
+                <td>{{ product.total_export }}</td>
+                <td>{{ product.current_stock }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        <h2>Thống kê tổng quan</h2>
+        <table>
+            <tr>
+                <th>Chỉ tiêu</th>
+                <th>Kết quả</th>
+            </tr>
+            <tr>
+                <td>Tổng số loại sản phẩm</td>
+                <td>{{ stockStatistics.total_products }}</td>
+            </tr>
+            <tr>
+                <td>Tổng số lượng tồn kho hiện tại</td>
+                <td>{{ stockStatistics.total_current_stock }}</td>
+            </tr>
+            <tr>
+                <td>Tổng số lượng nhập</td>
+                <td>{{ stockStatistics.total_import }}</td>
+            </tr>
+            <tr>
+                <td>Tổng số lượng xuất</td>
+                <td>{{ stockStatistics.total_export }}</td>
+            </tr>
+            <tr>
+                <td>Tổng giá trị tồn kho hiện tại (VNĐ)</td>
+                <td>{{ stockStatistics.total_present_storage }}</td>
+            </tr>
+            <tr>
+                <td>Số lượng sản phẩm Low Stock</td>
+                <td>{{ stockStatistics.product_low_stock_count }}</td>
+            </tr>
+        </table>
+        <h2>Danh sách sản phẩm Low Stock</h2>
+        <table>
+            <tr>
+                <th>Mã sản phẩm</th>
+                <th>Tên sản phẩm</th>
+                <th>Tồn kho hiện tại</th>
+                <th>Ngưỡng tối thiểu</th>
+                <th>Cần bổ sung</th>
+            </tr>
+            {% for product in lowStockProducts %}
+            <tr>
+                <td>{{ product.product_id }}</td>
+                <td>{{ product.product_name }}</td>
+                <td>{{ product.current_quantity }}</td>
+                <td>{{ product.min_stock }}</td>
+                <td>{{ product.resupply }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        <h2>Giá trị tồn kho theo sản phẩm</h2>
+        <table>
+            <tr>
+                <th>Mã sản phẩm</th>
+                <th>Tồn hiện tại</th>
+                <th>Đơn giá</th>
+                <th>Giá trị tồn kho (VNĐ)</th>
+            </tr>
+            {% for product in calculateStock %}
+            <tr>
+                <td>{{ product.product_id }}</td>
+                <td>{{ product.current_stock }}</td>
+                <td>{{ product.unit_price }}</td>
+                <td>{{ product.value_stock }}</td>
+            </tr>
+            {% endfor %}
+            <tr>
+                <td><strong>Tổng</strong></td>
+                <td><strong>{{ stockStatistics.total_current_stock }}</strong></td>
+                <td></td>
+                <td><strong>{{ stockStatistics.total_present_storage }}</strong></td>
+            </tr>
+        </table>
+        <h2>Kiểm tra giao dịch</h2>
+        <p>Có {{transactionHistory.total_import_transactions}} giao dịch nhập kho</p> 
+        <p>Có {{transactionHistory.total_export_transactions}} giao dịch xuất kho</p>
+        <p>Tổng số lượng nhập: {{transactionHistory.total_import_quantity}}</p>
+        <p>Tổng số lượng xuất: {{transactionHistory.total_export_quantity}}</p>
+
+        <h2> Danh sách sản phẩm có số lượng xuất kho nhiều nhất</h2>
+        <table>
+            {%for product in maxExportProducts.max_export_products%} 
+            <tr> 
+                <td>{{product.product_id}} - {{product.product_name}}</td>
+            </tr>
+            {% endfor %}
+            <tr>
+                <td><strong>Tổng số lượng xuất nhiều nhất: {{maxExportProducts.max_export_count}}</strong></td>
+            </tr>
+        </table>
+
+        <h2>Lịch sử giao dịch</h2>
+        <table>
+            <tr>
+                <th>Mã giao dịch</th>
+                <th>Mã sản phẩm</th>
+                <th>Tên sản phẩm</th>
+                <th>Loại giao dịch</th>
+                <th>Số lượng</th>
+                <th>Kết quả</th>
+            </tr>
+            {%for transaction in transactionHistoryList%}
+            <tr>
+                <td>{{transaction.transaction_id}}</td>
+                <td>{{transaction.product_id}}</td>
+                <td>{{transaction.product_name}}</td>
+                <td>{{transaction.type}}</td>
+                <td>{{transaction.quantity}}</td>
+                <td>{{transaction.result}}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        <form method="POST">
+            <label for="transaction_product_id">Tìm kiếm giao dịch theo product id:</label>
+            <input type="text" id="transaction_product_id" name="transaction_product_id">
+            <label for="type_transaction">Loại giao dịch:</label>
+            <select name="type_transaction" id="type_transaction">
+                <option value="import">Nhập kho</option>
+                <option value="export">Xuất kho</option>
+            </select>
+            <button type="submit" name="filter_transaction">Lọc lịch sử giao dịch</button>
+        </form>
+    </body>
+</html>

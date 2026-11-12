@@ -1,0 +1,14 @@
+Vì sao phải kiểm tra tồn kho trước khi thực hiện xuất hàng?
+=> Tránh xảy ra trường hợp người dùng xuất số lượng hàng > tồn kho làm số lượng tồn kho bị âm ảnh hưởng đến các dữ liệu thống kê tổng hợp liên quan đến doanh thu
+Nếu giao dịch xuất không hợp lệ, cần đảm bảo những dữ liệu nào không bị thay đổi?
+=>Nếu GD xuất không hợp lệ dữ liệu tồn kho của sản phẩm, dữ liệu thống kê tồn kho, trạng thái tồn kho của sản phẩm không bị thay đổi
+Nếu một sản phẩm có nhiều giao dịch nhập/xuất, bạn tính tồn kho hiện tại như thế nào?
+=> Em tính tồn kho hiện tại bằng cách: tồn hiện tại = tồn ban đầu + tổng nhập - tổng xuất, hoặc cứ mỗi lần giao dịch nhập xuất thực hiện (+ hoặc - tồn hiện tại trước khi gd) theo giao dịch gần nhất
+Nếu có hai người cùng xuất sản phẩm tại cùng một thời điểm, có thể xảy ra vấn đề gì?
+=> Xảy ra trường hợp người A và người B đều thấy tồn kho là 10 nhưng người xuất được hàng tồn kho còn người còn lại dù hiển thị số lượng tồn là 10 nhưng thông báo lỗi vượt quá giới hạn tồn kho, vì UI chưa cập nhật dữ liệu mới nhất 
+Nếu số lượng sản phẩm tăng lên 100.000 và lịch sử giao dịch lên đến hàng triệu bản ghi, bạn sẽ cải thiện cách lưu trữ và truy vấn như thế nào?
+=> em nghĩ sẽ lưu trữ vào CSDL để dễ dàng quản lý, truy vấn dữ liệu bằng các câu lệnh SQL kết hợp nhiều điều kiện, cơ chế caching 
+Nếu cần bổ sung chức năng hoàn trả hàng từ khách hàng, bạn sẽ xử lý giao dịch đó ra sao?
+=> Bổ sung UI hoàn trả cho KH cho KH nhập thông tin về giao dịch xuất đã từng xuất kho, nếu thông tin chính xác thì hiển thị nút hoàn trả cho KH nhấn, và hệ thống đồng thời cập nhật kho hàng theo giao dịch xuất được yêu cầu hoàn trả
+Nếu chương trình bị dừng giữa lúc cập nhật giao dịch, làm thế nào để tránh dữ liệu giao dịch và tồn kho không khớp nhau?
+=>Em nghĩ dùng cơ chế caching để lưu tạm dữ liệu khi hệ thống bị ngắt, nếu hệ thống hoạt động lại thì lấy dữ liệu cache ra để tiếp tục cập nhật
