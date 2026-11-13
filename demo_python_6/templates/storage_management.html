@@ -1,0 +1,183 @@
+<html>
+    <head>
+        <title>Storage Management</title>
+    </head>
+    <body>
+        {% if error != "" %}
+            <script>alert({{ error | tojson }});</script>
+        {% endif %}
+        {% if message != "" %}
+            <script>alert({{ message | tojson }});</script>
+        {% endif %}
+        <h1>Storage Management</h1>
+        <h2>Danh sách sản phẩm</h2>
+        <table>
+            <tr>
+                <th>Mã sản phẩm</th>
+                <th>Tên sản phẩm</th>
+                <th>Đơn giá (VND)</th>
+                <th>Ngưỡng tồn tối thiểu</th>
+            </tr>
+            {% for product in products %}
+                <tr>
+                    <td>{{ product.product_id }}</td>
+                    <td>{{ product.product_name }}</td>
+                    <td>{{ product.unit_price }}</td>
+                    <td>{{ product.min_stock }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+        <h2>Danh sách kho</h2>
+        <table>
+            <tr>
+                <th>Mã kho</th>
+                <th>Tên kho</th>
+            </tr>
+            {% for storage in storages %}
+                <tr>
+                    <td>{{ storage.warehouse_id }}</td>
+                    <td>{{ storage.warehouse_name }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+        <h2>Quản lý tồn kho theo từng kho</h2>
+        <table>
+            <tr>
+                <th>Mã sản phẩm</th>
+                {% for storage in storages %}
+                    <th>{{ storage.warehouse_id }}</th>
+                {% endfor %}
+                <th>Tổng tồn </th>
+            </tr>
+            {% for quantity in quantityManagement %}
+                <tr>
+                    <td>{{ quantity.product_id }}</td>
+                    {% for storage in quantity.storage_quantity.values() %}
+                        <td>{{ storage }}</td>
+                    {% endfor %}
+                    <td>{{ quantity.total_quantity }}</td>
+                </tr>
+            {% endfor %}
+            <tr>
+                <td><strong>Tổng tồn</strong></td>
+                {% for storage in calculateWareHouseStock %}
+                    <td><strong>{{ storage.total_quantity }}</strong></td>
+                {% endfor %}
+                <td><strong>{{ inventoryStatistics.total_quantity_count }}</strong></td>
+            </tr>
+        </table>
+        <h2>Giá trị tồn kho theo từng kho(VND)</h2>
+        {% for storage in storages%}
+            <h3><strong>Kho: {{storage.warehouse_id}}-{{storage.warehouse_name}}</strong></h3>
+            <table>
+                <tr>
+                    <th>Mã sản phẩm</th>
+                    <th>Số lượng tồn kho</th>
+                    <th>Đơn giá (VND)</th>
+                    <th>Giá trị tồn kho (VND)</th>
+                </tr>
+                {%for warehouse_id, products in inventoryValue.items()%}
+                    {% if warehouse_id == storage.warehouse_id %}
+                        {%for product in products%}
+                            <tr>
+                                <td>{{product.product_id}}</td>
+                                <td>{{product.current_quantity}}</td>
+                                <td>{{product.unit_price}}</td>
+                                <td>{{product.total_value}}</td>
+                            </tr>
+                        {% endfor %}
+                    {% endif %}
+                {% endfor %}
+                <tr>
+                    <td><strong>Tổng</strong></td>
+                    {%for quantity in calculateWareHouseStock%}
+                        {% if quantity.warehouse_id == storage.warehouse_id %}
+                            <td><strong>{{quantity.total_quantity}}</strong></td>
+                        {% endif %}
+                    {% endfor %}
+                    <td></td>
+                    <td><strong>{{inventoryStatistics.total_quantity_value_storage[storage.warehouse_id]}}</strong></td>
+                </tr>
+            </table>
+        {% endfor %}
+        <h2>Giao dịch kho hàng hóa (Nhập/Xuất/Chuyển)</h2>
+        <form method="post">
+            <label for="input">Nhập thông tin giao dịch:</label>
+            <textarea id="input" name="input" rows="3" cols="30"></textarea>
+            <br>
+            <select name="typeP">
+                <option value="import">Nhập kho</option>
+                <option value="export">Xuất kho</option>
+                <option value="transfer">Chuyển kho</option>
+            </select>
+            <br>
+            <button type="submit" name="process">Xử lý</button>
+        </form>
+        <h2>Thống kê toàn bộ hệ thống</h2>
+        <table>
+            <tr><td>Tổng số sản phẩm:</td><td>{{ inventoryStatistics.total_products }}</td></tr>
+            <tr><td>Tổng số kho:</td><td>{{ inventoryStatistics.total_warehouses }}</td></tr>
+            <tr><td>Tổng số lượng tồn kho:</td><td>{{ inventoryStatistics.total_quantity_count }}</td></tr>
+            <tr><td>Tổng giá trị tồn kho:</td><td>{{ inventoryStatistics.total_quantity_value }}</td></tr>
+            <tr><td>Tổng số lượng nhập:</td><td>{{ inventoryStatistics.total_import_quantity }}</td></tr>
+            <tr><td>Tổng số lượng xuất:</td><td>{{ inventoryStatistics.total_export_quantity }}</td></tr>
+            <tr><td>Tổng số lượng chuyển:</td><td>{{ inventoryStatistics.total_transfer_quantity }}</td></tr>
+            <tr><td>Số sản phẩm dưới hoăc bằng ngưỡng tồn tối thiểu:</td><td>{{ inventoryStatistics.low_stock_product_count }}</td></tr>
+        </table>
+        <h2>Cảnh báo tồn kho thấp </h2>
+        <h3>Danh sách sản phẩm dưới hoặc bằng ngưỡng tồn tối thiểu</h3>
+        <table>
+            <tr>
+            <th>Mã sản phẩm</th>
+            <th>Tên sản phẩm</th>
+            <th>Ngưỡng tồn tối thiểu</th>
+            <th>Tổng tồn kho</th>
+        </tr>
+        {% for product in lowStockProducts %}
+            <tr>
+                <td>{{ product.product_id }}</td>
+                <td>{{ product.product_name }}</td>
+                <td>{{ product.min_stock }}</td>
+                <td>{{ product.total_current_quantity }}</td>
+            </tr>
+        {% endfor %}
+        </table>
+        <h2>Lịch sử giao dịch</h2>
+        <table>
+            <tr>
+                <th>Mã giao dịch</th>
+                <th>Mã sản phẩm</th>
+                <th>Loại giao dịch</th>
+                <th>Số lượng</th>
+                <th>Kho nguồn</th>
+                <th>Kho đích</th>
+            </tr>
+            {% for transaction in transactionsHistory %}
+                <tr>
+                    <td>{{ transaction.transaction_id }}</td>
+                    <td>{{ transaction.product_id }}</td>
+                    <td>{{ transaction.type }}</td>
+                    <td>{{ transaction.quantity }}</td>
+                    <td>{{ transaction.source_warehouse }}</td>
+                    <td>{{ transaction.target_warehouse if transaction.target_warehouse else '-' }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+        <form method="post">
+            <label for="product_id">Mã sản phẩm:</label>
+            <input type="text" id="product_id" name="product_id" value="{{product_id if productId else ''}}">
+            <label for="warehouse_id">Mã kho:</label>
+            <input type="text" id="warehouse_id" name="warehouse_id" value="{{warehouse_id if warehouseId else ''}}">
+            <label for="transaction_id">Mã giao dịch:</label>
+            <input type="text" id="transaction_id" name="transaction_id" value="{{transaction_id if transactionId else ''}}">
+            <label for="typeSort">Loại giao dịch:</label>
+            <select id="typeSort" name="typeSort">
+                <option value="all" {% if typeSort == 'all' %}selected{% endif %}`>Tất cả</option>
+                <option value="import" {% if typeSort == 'import' %}selected{% endif %}>Nhập kho</option>
+                <option value="export" {% if typeSort == 'export' %}selected{% endif %}>Xuất kho</option>
+                <option value="transfer" {% if typeSort == 'transfer' %}selected{% endif %}>Chuyển kho</option>
+            </select>
+            <button type="submit" name="filter">Lọc</button>
+        </form>
+    </body>
+</html>

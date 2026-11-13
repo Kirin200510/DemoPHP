@@ -1,0 +1,14 @@
+Vì sao chuyển kho không làm thay đổi tổng tồn kho toàn hệ thống?
+=> Vì hàng được chuyển từ kho này sang kho khác, tổng tồn kho được tính theo tổng số lượng hàng tồn của tất cả các kho có trên hệ thống.
+Nếu kho nguồn đủ hàng nhưng kho đích không tồn tại, giao dịch sẽ được xử lý thế nào?
+=> Em thực hiện kiểm tra thông tin chuyển kho nếu nhập thông tin không phù hợp thì thông báo lỗi và không thực hiện tạo bản ghi giao dịch, không cập nhật dữ liệu trên hệ thống
+Nếu chuyển kho thành công nhưng chỉ cập nhật được kho nguồn, điều gì sẽ xảy ra?
+=> Dữ liệu số lượng của sản phẩm chuyển kho đó bị mất trên hệ thống, mất tiền và doanh thu của hệ thống, thống kê dữ liệu không chính xác
+Làm thế nào để tính lại tồn kho từ lịch sử giao dịch?
+=> Với sản phẩm A tìm tất cả giao dịch liên quan đến sản phẩm đó , sau đó thực hiện tính tồn kho hiện tại của sp A bằng công thức Tồn hiện tại=tồn đầu +tổng nhập của SP A - tổng xuất SP A 
+Nếu phát hiện số lượng tồn kho đang lưu không khớp với lịch sử giao dịch, bạn sẽ xử lý ra sao?
+=>Em kiểm tra cách tính toán số lượng tồn kho hiện tại để  xử lý nêu có sai
+Nếu có nhiều người cùng thực hiện xuất hàng tại một thời điểm, có thể xảy ra vấn đề gì?
+=> Xảy ra trường hợp người A và người B đều thấy tồn kho là 10 nhưng người xuất được hàng tồn kho còn người còn lại dù hiển thị số lượng tồn là 10 nhưng thông báo lỗi vượt quá giới hạn tồn kho, vì UI chưa cập nhật dữ liệu mới nhất 
+Nếu số lượng giao dịch lên đến hàng triệu bản ghi, bạn sẽ cải thiện cách lưu trữ và truy vấn như thế nào?
+=> Em sẽ lưu trữ thông tin giao dịch trên CSDL để dễ dàng quản lý và dùng cơ chế caching truy vấn để  tối ưu hóa tốc độ truy xuất dữ liệu
